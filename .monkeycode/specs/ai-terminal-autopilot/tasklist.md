@@ -1,0 +1,52 @@
+# 需求实施计划 — AI Terminal Autopilot
+
+- [ ] 1. 项目基座改造
+  - [ ] 1.1 应用重命名与包结构调整：namespace/applicationId 改为 `dev.autopilot.terminal`，源码迁移至对应目录，清理模板 MainActivity/layout
+  - [ ] 1.2 引入依赖：Compose BOM、Activity-Compose、Navigation-Compose、Room(KTX)、OkHttp、kotlinx-coroutines、security-crypto、rikka.shizuku(api+provider)、commons-compress + org.tukaati:xz（deb 解压）
+  - [ ] 1.3 建立包结构：`terminal/`、`bootstrap/`、`agent/`、`llm/`、`perms/`、`data/`、`ui/`
+  - [ ] 1.4 关闭 AGP 对缺失传统 res 的强制要求并启用 Compose 编译器配置，确保空壳可构建
+- [ ] 2. 数据模型与持久化（design: Data Models）
+  - [ ] 2.1 定义 ModelConfig、Task、PlanStep、AuditEntry 数据类与 Room Entity/DAO
+  - [ ] 2.2 实现 AppDatabase 与仓库层（TaskRepository、AuditRepository、ConfigStore 接口）
+  - [ ] 2.3 实现 EncryptedSharedPreferences 版 ConfigStore（密钥仅存加密存储，对应 P4）
+- [ ] 3. PTY 终端层（requirements R1，design: PtySession）
+  - [ ] 3.1 实现 JNI 层 `pty.c`：forkpty 创建会话、read/write/resize/kill，注册为 `PtyJni`
+  - [ ] 3.2 实现 Kotlin `PtySession`：会话生命周期、输出流回调、进程退出码回调（R1.5）
+  - [ ] 3.3 实现多会话管理器 `SessionRegistry`：创建/切换/关闭命名会话（R1.3）
+  - [ ] 3.4 实现轻量 ANSI 终端渲染器 `TerminalRenderer`：SGR 颜色、光标定位、清屏等常用转义序列解析与 Span 渲染
+  - [ ] 3.5* PtySession 仪器测试：真执行 echo/ls 并断言输出与退出码
+- [ ] 4. Bootstrap 用户态安装器（requirements R1.4，design: Bootstrap）
+  - [ ] 4.1 实现 deb 包下载器：从 Termux APT 镜像按 ABI 拉取 busybox/coreutils/bash/git/clang/python/node 的 .deb
+  - [ ] 4.2 实现 ar/xz/tar 解压管线，落盘至 `{filesDir}/usr` 并生成 `$PREFIX` 环境脚本（PATH/HOME/TMPDIR/LD_LIBRARY_PATH）
+  - [ ] 4.3 实现安装状态机与失败重试入口（对应 Error Handling: Bootstrap 失败阻断终端）
+  - [ ] 4.4 预留 assets 内置通道接口 `BootstrapSource`（离线分发扩展点）
+  - [ ] 4.5* 安装器单元测试：本地伪造 deb 样本走通解压与路径注册
+- [ ] 5. LLM 接入层（requirements R2）
+  - [ ] 5.1 实现 `LlmClient`：OkHttp SSE 流式调用 OpenAI 兼容 `/chat/completions`，超时指数退避重试 3 次、429 遵循 Retry-After（Error Handling 表）
+  - [ ] 5.2 实现模型配置界面 ViewModel 与连通性自检（R2.1/R2.4：失败展示阶段与错误详情）
+  - [ ] 5.3* 密钥脱敏属性测试：任何日志/报告格式化输出中 apiKey 必被掩码（P4）
+- [ ] 6. Agent 自动驾驶引擎（requirements R3，design: AgentEngine）
+  - [ ] 6.1 实现 `CommandRunner`：命令注入 + `__EXIT_CODE:$?__` 标记捕获退出码 + 输出头尾各半截断送模型
+  - [ ] 6.2 实现 `RiskFilter` 规则表：递归删除系统路径、磁盘破坏、关键目录 chmod、关机重启类模式命中即暂停（R4.2）
+  - [ ] 6.3 实现 `PlanParser`：计划 JSON 数组解析，畸形输入附错误重问一次后仍失败转 PAUSED
+  - [ ] 6.4 实现 `AgentEngine` 协程状态机 IDLE→PLANNING→EXECUTING↔OBSERVING→REPAIRING/AWAIT_CONFIRM/DONE/PAUSED_LIMIT/STOPPED，轮数上限默认 50（R3 全部验收项）
+  - [ ] 6.5 实现 `AuditLogger`：每条命令时间戳/通道/命令/退出码落 Room，支持文本导出（R4.3/R4.4）
+  - [ ] 6.6* RiskFilter 属性测试：任意高危样本必返回 CONFIRM，普通样本必放行
+  - [ ] 6.7* 退出码标记解析边界单测：多行输出/嵌套 echo/命令含引号场景
+- [ ] 7. 权限增强层（requirements R5，design: CommandChannel）
+  - [ ] 7.1 定义 `CommandChannel` 接口与 `PermissionLevel` 枚举，实现 `PtyChannel`
+  - [ ] 7.2 实现 `ShizukuChannel`：绑定 Shizuku、`newProcess("/system/bin/sh")` 执行与结果回传（R5.3）
+  - [ ] 7.3 实现 `PermissionManager`：三档检测、所有文件访问权限引导、Shizuku 无线调试引导页（R5.1/R5.2）
+  - [ ] 7.4 实现自动降级选择器：高通道不可用回退低通道并在报告标注降级（R5.5）
+- [ ] 8. UI 层（Compose，requirements R1/R3/R6）
+  - [ ] 8.1 应用骨架：单 Activity + Navigation、深色终端风主题、首次启动风险提示确认页（R4.1）
+  - [ ] 8.2 终端主界面：TerminalRenderer 渲染 + 输入行 + 会话切换抽屉 + 实时步骤条（R3.4 WHILE 态展示）
+  - [ ] 8.3 任务面板 BottomSheet：目标输入、计划展示、逐步进度、停止按钮（R4.5）、完成报告页（变更清单/耗时/降级标注 R3.6）
+  - [ ] 8.4 高危确认对话框：命中规则说明 + 放行/拒绝（R4.2）
+  - [ ] 8.5 文件树屏：工作区浏览与只读查看（R6.4）
+  - [ ] 8.6 工作区导入导出：zip 到公共下载目录与反向导入（R6.2/R6.3）
+- [ ] 9. 检查点 — 本地构建验证：`./gradlew :app:assembleDebug` 通过（后台终端受控执行），如有疑问询问用户
+- [ ] 10. Agent 循环集成验证
+  - [ ] 10.1 MockWebServer 脚本化 LLM 序列：正常完成链路（PLANNING→EXECUTING…→DONE 报告生成）
+  - [ ] 10.2 失败修正链路：注入失败命令触发 REPAIRING 后恢复
+  - [ ] 10.3 高危暂停与放行恢复链路（P2）、轮数上限 PAUSED_LIMIT（P3）、STOPPED 语义下新命令零注入（P5）
