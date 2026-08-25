@@ -27,26 +27,38 @@ interface ConfigStore {
 
 class EncryptedConfigStore(context: Context) : ConfigStore {
 
+    private val appContext = context.applicationContext
+
     private val prefs by lazy {
-        val masterKey = MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        EncryptedSharedPreferences.create(
-            context,
-            "model_config",
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
+        try {
+            val masterKey = MasterKey.Builder(appContext)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            EncryptedSharedPreferences.create(
+                appContext,
+                "model_config",
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        } catch (t: Throwable) {
+            appContext.getSharedPreferences("model_config_fallback", Context.MODE_PRIVATE)
+        }
     }
 
     override fun load(): ModelConfig {
-        val raw = prefs.getString(KEY, null) ?: return ModelConfig()
-        return runCatching { Json.decodeFromString<ModelConfig>(raw) }.getOrDefault(ModelConfig())
+        return try {
+            val raw = prefs.getString(KEY, null) ?: return ModelConfig()
+            runCatching { Json.decodeFromString<ModelConfig>(raw) }.getOrDefault(ModelConfig())
+        } catch (t: Throwable) {
+            ModelConfig()
+        }
     }
 
     override fun save(config: ModelConfig) {
-        prefs.edit().putString(KEY, Json.encodeToString(ModelConfig.serializer(), config)).apply()
+        runCatching {
+            prefs.edit().putString(KEY, Json.encodeToString(ModelConfig.serializer(), config)).apply()
+        }
     }
 
     private companion object {

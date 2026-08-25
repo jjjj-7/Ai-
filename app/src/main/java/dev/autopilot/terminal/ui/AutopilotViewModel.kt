@@ -7,7 +7,6 @@ import dev.autopilot.terminal.bootstrap.BootstrapInstaller
 import dev.autopilot.terminal.data.EncryptedConfigStore
 import dev.autopilot.terminal.data.ModelConfig
 import dev.autopilot.terminal.agent.AgentEngine
-import dev.autopilot.terminal.agent.AgentUiState
 import dev.autopilot.terminal.llm.LlmClient
 import dev.autopilot.terminal.perms.PtyChannel
 import dev.autopilot.terminal.perms.PermissionManager
@@ -37,19 +36,11 @@ class AutopilotViewModel(app: Application) : AndroidViewModel(app) {
         llm = llm,
         db = db,
         channelProvider = {
-            ensureChannel()
+            runCatching { ensureChannel() }
             ptyChannel?.takeIf { it.kind == dev.autopilot.terminal.perms.ChannelKind.PTY }
         },
-        channelDescProvider = { perms.channelDescription() }
+        channelDescProvider = { runCatching { perms.channelDescription() }.getOrDefault("通道检测中") }
     )
-
-    private fun ensureChannel() {
-        if (ptyChannel != null) return
-        val session = registry.byName(AGENT_SESSION)?.session
-            ?: registry.create(AGENT_SESSION)?.session
-            ?: return
-        ptyChannel = PtyChannel(session, dev.autopilot.terminal.perms.CommandRunner(viewModelScope), viewModelScope)
-    }
 
     private val _riskAccepted = MutableStateFlow(false)
     val riskAccepted: StateFlow<Boolean> = _riskAccepted
@@ -58,7 +49,10 @@ class AutopilotViewModel(app: Application) : AndroidViewModel(app) {
     val config: StateFlow<ModelConfig> = _config
 
     init {
-        viewModelScope.launch { ensureBootstrap() }
+        viewModelScope.launch {
+            runCatching { ensureBootstrap() }
+                .onFailure { android.util.Log.e(TAG, "bootstrap failed", it) }
+        }
     }
 
     fun acceptRisk() {
@@ -71,12 +65,22 @@ class AutopilotViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun retryBootstrap() {
-        viewModelScope.launch { ensureBootstrap() }
+        viewModelScope.launch {
+            runCatching { ensureBootstrap() }
+        }
     }
 
     private suspend fun ensureBootstrap() {
         if (installer.isReady()) return
         installer.ensureInstalled()
+    }
+
+    private fun ensureChannel() {
+        if (ptyChannel != null) return
+        val session = registry.byName(AGENT_SESSION)?.session
+            ?: registry.create(AGENT_SESSION)?.session
+            ?: return
+        ptyChannel = PtyChannel(session, dev.autopilot.terminal.perms.CommandRunner(viewModelScope), viewModelScope)
     }
 
     fun submitTask(goal: String, criteria: List<String>) {
@@ -88,6 +92,7 @@ class AutopilotViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     companion object {
+        private const val TAG = "AutopilotVM"
         const val AGENT_SESSION = "agent"
     }
 }

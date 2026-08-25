@@ -35,13 +35,18 @@ class PtySession(
     val exitCode: StateFlow<Int?> = _exitCode
 
     init {
-        masterFd = PtyJni.forkPty(cmd, argv.toTypedArray(), envp.toTypedArray(), cwd, pidHolder)
-        if (masterFd >= 0) {
-            PtyJni.resize(masterFd, cols, rows)
-            startReader()
-            watchExit()
-        } else {
+        if (!PtyJni.available) {
             _exitCode.value = -1
+            _output.tryEmit("[native] PTY 库不可用：当前设备 ABI 不受支持".toByteArray())
+        } else {
+            masterFd = PtyJni.forkPty(cmd, argv.toTypedArray(), envp.toTypedArray(), cwd, pidHolder)
+            if (masterFd >= 0) {
+                PtyJni.resize(masterFd, cols, rows)
+                startReader()
+                watchExit()
+            } else {
+                _exitCode.value = -1
+            }
         }
     }
 

@@ -1,9 +1,10 @@
 package dev.autopilot.terminal.terminal
 
 object PtyJni {
-    init {
+    val available: Boolean = runCatching {
         System.loadLibrary("autopilot_pty")
-    }
+        true
+    }.getOrDefault(false)
 
     external fun forkPty(
         cmd: String,

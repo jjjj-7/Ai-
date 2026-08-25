@@ -10,8 +10,11 @@ class AutopilotApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        workspaceRoot = File(filesDir, "workspace").apply {
-            if (!exists()) mkdirs()
+        CrashReporter.install(this)
+        workspaceRoot = try {
+            File(filesDir, "workspace").apply { if (!exists()) mkdirs() }
+        } catch (t: Throwable) {
+            cacheDir.apply { mkdirs() }
         }
     }
 }
