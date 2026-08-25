@@ -6,4 +6,3 @@ local.properties
 *.iml
 .kotlin/
 captures/
-.monkeycode/
