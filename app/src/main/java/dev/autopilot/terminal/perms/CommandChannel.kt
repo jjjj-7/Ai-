@@ -15,6 +15,7 @@ interface CommandChannel {
     val kind: ChannelKind
     val level: ChannelLevel
     suspend fun exec(command: String, timeoutMs: Long): ExecResult
+    fun killCurrent() {}
     fun close()
 }
 

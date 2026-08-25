@@ -20,6 +20,13 @@ class TermuxChannel(
 
     private val counter = AtomicLong(0)
 
+    @Volatile private var activeSession: TerminalSession? = null
+
+    override fun killCurrent() {
+        activeSession?.let { s -> runCatching { s.finishIfRunning() } }
+        activeSession = null
+    }
+
     override suspend fun exec(command: String, timeoutMs: Long): ExecResult {
         val cwd = registryWorkspace()
         val session = registry.createOnce(
@@ -27,26 +34,31 @@ class TermuxChannel(
             arrayOf("-c", command),
             cwd
         ) ?: return ExecResult(null, "终端环境未就绪，无法执行命令", false)
+        activeSession = session
 
-        val finished = CompletableDeferred<Int>()
-        scope.launch {
-            while (!session.isRunning()) {
-                delay(20)
+        try {
+            val finished = CompletableDeferred<Int>()
+            scope.launch {
+                while (!session.isRunning()) {
+                    delay(20)
+                }
+                while (session.isRunning()) {
+                    delay(60)
+                }
+                finished.complete(session.exitStatus)
             }
-            while (session.isRunning()) {
-                delay(60)
+
+            val code = withTimeoutOrNull(timeoutMs) { finished.await() }
+            if (code == null) {
+                runCatching { session.finishIfRunning() }
+                return ExecResult(null, digest(transcript(session)), true)
             }
-            finished.complete(session.exitStatus)
-        }
 
-        val code = withTimeoutOrNull(timeoutMs) { finished.await() }
-        if (code == null) {
-            runCatching { session.finishIfRunning() }
-            return ExecResult(null, digest(transcript(session)), true)
+            delay(120)
+            return ExecResult(code, digest(transcript(session)), false)
+        } finally {
+            if (activeSession === session) activeSession = null
         }
-
-        delay(120)
-        return ExecResult(code, digest(transcript(session)), false)
     }
 
     private fun transcript(session: TerminalSession): String =

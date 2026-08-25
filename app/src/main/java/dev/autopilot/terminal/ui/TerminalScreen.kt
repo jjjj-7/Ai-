@@ -47,11 +47,17 @@ fun TerminalScreen(vm: AutopilotViewModel) {
             else -> Unit
         }
 
-        val active = sessions.firstOrNull { it.interactive }
+        val active = sessions.firstOrNull { it.interactive && it.session.isRunning }
         if (active == null) {
+            vm.registry.pruneDead()
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("终端会话未创建", color = Color(0xFF9CA3AF))
+                    Text(
+                        if (bootstrapState is BootstrapInstaller.InstallState.Ready)
+                            "终端未运行"
+                        else "等待环境安装完成",
+                        color = Color(0xFF9CA3AF)
+                    )
                     Spacer(Modifier.height(8.dp))
                     Button(
                         onClick = { vm.registry.createInteractive(AutopilotViewModel.AGENT_SESSION) },

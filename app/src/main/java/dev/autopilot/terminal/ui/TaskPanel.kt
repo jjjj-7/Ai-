@@ -47,6 +47,7 @@ private val RoleColor = mapOf(
 fun ChatPanel(vm: AutopilotViewModel) {
     val state by vm.engine.uiState.collectAsStateSafe()
     val chat by vm.engine.chat.collectAsStateSafe()
+    val busy by vm.engine.busy.collectAsStateSafe()
     val listState = rememberLazyListState()
 
     LaunchedEffect(chat.size) {
@@ -55,12 +56,33 @@ fun ChatPanel(vm: AutopilotViewModel) {
 
     Surface {
         Column(Modifier.fillMaxWidth().heightIn(min = 180.dp, max = 300.dp).background(TerminalSurface)) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (busy) {
+                    LinearProgressIndicator(Modifier.weight(1f))
+                    Spacer(Modifier.width(10.dp))
+                    Text("AI 工作中", color = AccentGreen, fontSize = 11.sp)
+                    Spacer(Modifier.width(10.dp))
+                    Button(onClick = { vm.engine.stop() }) { Text("停止", fontSize = 12.sp) }
+                } else {
+                    Text(
+                        when (state) {
+                            is AgentUiState.Stopped -> "已停止"
+                            is AgentUiState.Failed -> "失败"
+                            is AgentUiState.Done -> "任务完成"
+                            is AgentUiState.PausedLimit -> "已达上限"
+                            else -> "待命"
+                        },
+                        color = Color(0xFF9CA3AF), fontSize = 11.sp,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+
             when (val s = state) {
-                is AgentUiState.Planning -> StatusRow("AI 正在制定执行计划...", s)
-                is AgentUiState.Executing -> ExecutingHeader(s, vm)
                 is AgentUiState.AwaitConfirm -> ConfirmDialog(s, vm)
-                is AgentUiState.PausedLimit -> LimitRow(vm)
-                is AgentUiState.Done -> DoneRow(s.summary)
                 else -> Unit
             }
 
@@ -153,29 +175,6 @@ private fun GoalInput(vm: AutopilotViewModel) {
 }
 
 @Composable
-private fun StatusRow(text: String, state: AgentUiState.Planning) {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 12.dp)) {
-        LinearProgressIndicator(Modifier.width(80.dp))
-        Spacer(Modifier.width(10.dp))
-        Text(text, color = Color(0xFFD1D5DB), fontSize = 12.sp)
-    }
-}
-
-@Composable
-private fun ExecutingHeader(state: AgentUiState.Executing, vm: AutopilotViewModel) {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 12.dp)) {
-        LinearProgressIndicator(Modifier.weight(1f))
-        Spacer(Modifier.width(10.dp))
-        Text(
-            "第 ${state.iteration} 轮 · ${state.stepIndex + 1}/${state.totalSteps}",
-            color = AccentGreen, fontSize = 11.sp
-        )
-        Spacer(Modifier.width(8.dp))
-        OutlinedButton(onClick = { vm.engine.stop() }) { Text("停止", fontSize = 11.sp) }
-    }
-}
-
-@Composable
 private fun ConfirmDialog(state: AgentUiState.AwaitConfirm, vm: AutopilotViewModel) {
     AlertDialog(
         onDismissRequest = {},
@@ -189,24 +188,6 @@ private fun ConfirmDialog(state: AgentUiState.AwaitConfirm, vm: AutopilotViewMod
         },
         confirmButton = { Button(onClick = vm.engine::confirm) { Text("放行") } },
         dismissButton = { OutlinedButton(onClick = vm.engine::reject) { Text("拒绝") } }
-    )
-}
-
-@Composable
-private fun LimitRow(vm: AutopilotViewModel) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
-        Text("已达迭代上限", color = AccentAmber, fontSize = 12.sp, modifier = Modifier.weight(1f))
-        OutlinedButton(onClick = { vm.engine.stop("任务已归档") }) { Text("结束") }
-    }
-}
-
-@Composable
-private fun DoneRow(summary: String) {
-    Text(
-        "完成: $summary",
-        color = AccentGreen, fontSize = 12.sp,
-        modifier = Modifier.padding(horizontal = 12.dp),
-        maxLines = 3
     )
 }
 

@@ -12,7 +12,9 @@ android {
     defaultConfig {
         applicationId = "dev.autopilot.terminal"
         minSdk = 26
-        targetSdk = 34
+        // Termux-ecosystem requirement: targetSdk >= 29 makes SELinux block execve()
+        // of app-private binaries (W^X enforcement), killing the whole userland.
+        targetSdk = 28
         versionCode = 1
         versionName = "0.1.0"
         ndk {
@@ -54,6 +56,11 @@ android {
 
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.8"
+    }
+
+    lint {
+        disable += "ExpiredTargetSdkVersion"
+        checkReleaseBuilds = false
     }
 
     packaging {

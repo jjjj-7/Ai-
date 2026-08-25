@@ -27,6 +27,9 @@ class SessionRegistry(
 
     fun createInteractive(name: String): TermuxSessionState? {
         if (!installer.isReady()) return null
+        val existing = byName(name)
+        if (existing != null && existing.session.isRunning) return existing
+
         val bash = File(installer.prefix, "bin/bash")
         val session = TerminalSession(
             bash.absolutePath,
@@ -38,8 +41,14 @@ class SessionRegistry(
         )
         session.initializeEmulator(DEFAULT_COLS, DEFAULT_ROWS)
         val state = TermuxSessionState(name, session, interactive = true)
-        _sessions.value = _sessions.value.filter { it.name != name } + state
+        _sessions.value = _sessions.value
+            .filter { it.name != name && it.session.isRunning }
+            .filter { it.interactive || it.session.isRunning } + state
         return state
+    }
+
+    fun pruneDead() {
+        _sessions.value = _sessions.value.filter { it.session.isRunning }
     }
 
     fun createOnce(name: String, shellArgs: Array<String>, cwd: String): TerminalSession? {
