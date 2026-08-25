@@ -18,6 +18,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -34,6 +35,21 @@ import dev.autopilot.terminal.bootstrap.BootstrapInstaller
 fun TerminalScreen(vm: AutopilotViewModel) {
     val bootstrapState by vm.installer.state.collectAsStateSafe()
     val sessions by vm.registry.sessions.collectAsStateSafe()
+    val openAt by vm.openTerminalAt.collectAsStateSafe()
+
+    LaunchedEffect(openAt) {
+        val dir = openAt ?: return@LaunchedEffect
+        val ready = bootstrapState is BootstrapInstaller.InstallState.Ready
+        if (ready && dir.isDirectory) {
+            val state = sessions.firstOrNull { it.interactive && it.session.isRunning }
+                ?: vm.registry.createInteractive(AutopilotViewModel.AGENT_SESSION)
+            state?.session?.let {
+                val cmd = "cd '${dir.absolutePath}'\n".toByteArray()
+                it.write(cmd, 0, cmd.size)
+            }
+        }
+        vm.openTerminalAt.value = null
+    }
 
     Column(
         Modifier

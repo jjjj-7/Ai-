@@ -13,6 +13,7 @@ import dev.autopilot.terminal.terminal.SessionRegistry
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import java.io.File
 
 class AutopilotViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -35,6 +36,14 @@ class AutopilotViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _riskAccepted = MutableStateFlow(false)
     val riskAccepted: StateFlow<Boolean> = _riskAccepted
+
+    val openTerminalAt = MutableStateFlow<File?>(null)
+    val navigateTab = MutableStateFlow<String?>(null)
+
+    fun requestOpenInTerminal(dir: File) {
+        navigateTab.value = "terminal"
+        openTerminalAt.value = dir
+    }
 
     private val _config = MutableStateFlow(configStore.load())
     val config: StateFlow<ModelConfig> = _config

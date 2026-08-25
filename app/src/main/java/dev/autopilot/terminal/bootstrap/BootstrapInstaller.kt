@@ -30,10 +30,12 @@ class BootstrapInstaller private constructor(private val appContext: Context) {
         _state.value = InstallState.Installing
         try {
             if (isReady()) {
+                setupStorageLinks()
                 _state.value = InstallState.Ready
                 return@withContext
             }
             installFromAssets()
+            setupStorageLinks()
             _state.value = if (isReady()) InstallState.Ready
             else InstallState.Failed("bootstrap 解压完成但 bash 缺失")
         } catch (t: Throwable) {
@@ -42,6 +44,27 @@ class BootstrapInstaller private constructor(private val appContext: Context) {
     }
 
     fun isReady(): Boolean = runCatching { File(prefix, "bin/bash").canExecute() }.getOrDefault(false)
+
+    fun setupStorageLinks() {
+        val storageDir = File(homeDir, "storage")
+        storageDir.mkdirs()
+        val shared = "/storage/emulated/0"
+        val links = mapOf(
+            "shared" to shared,
+            "downloads" to "$shared/Download",
+            "dcim" to "$shared/DCIM",
+            "pictures" to "$shared/Pictures",
+            "movies" to "$shared/Movies",
+            "music" to "$shared/Music"
+        )
+        links.forEach { (name, target) ->
+            runCatching {
+                val link = File(storageDir, name)
+                if (link.exists() && !link.isDirectory) link.delete()
+                if (!link.exists()) Os.symlink(target, link.absolutePath)
+            }
+        }
+    }
 
     fun envSpec(cwd: String): Array<String> {
         val path = System.getenv("PATH") ?: "/system/bin"

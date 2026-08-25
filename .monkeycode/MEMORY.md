@@ -34,3 +34,4 @@
   - com.termux.view.R 引用通过手写桥接 R.java 映射到 app namespace 资源
   - AI 执行通道 TermuxChannel：每条命令新建 sh -c 会话（真 PTY），进程退出即完成，exitStatus 即真实退出码
   - git 提交时 .git/hooks/prepare-commit-msg 会强制附加 Co-authored-by 尾注；用户要求提交纯以本人名义，需临时 mv 钩子提交后恢复
+  - Kotlin 从 launch lambda 抽取 suspend 函数时：return@launch 改 return，launch 的闭合 } 不能残留（曾导致类提前闭合）；验证括号配平用 python 逐行深度追踪，kotlinc 报错行号可能指向无辜位置

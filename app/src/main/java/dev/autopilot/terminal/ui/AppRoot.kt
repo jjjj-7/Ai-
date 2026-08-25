@@ -11,6 +11,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -38,6 +39,18 @@ fun AppRoot(vm: AutopilotViewModel = viewModel()) {
         val navController = rememberNavController()
         val backStack by navController.currentBackStackEntryAsState()
         val currentRoute = backStack?.destination?.route ?: Dest.Terminal.route
+
+        val navTarget by vm.navigateTab.collectAsStateSafe()
+        LaunchedEffect(navTarget) {
+            val target = navTarget ?: return@LaunchedEffect
+            runCatching {
+                navController.navigate(target) {
+                    popUpTo(Dest.Terminal.route) { saveState = true }
+                    launchSingleTop = true
+                }
+            }
+            vm.navigateTab.value = null
+        }
 
         Scaffold(
             bottomBar = {
