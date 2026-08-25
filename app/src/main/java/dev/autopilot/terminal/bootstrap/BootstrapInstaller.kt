@@ -58,9 +58,8 @@ class BootstrapInstaller private constructor(private val appContext: Context) {
 
     private fun archName(): String {
         val abis = Build.SUPPORTED_ABIS
-        val preferred = listOf("arm64-v8a", "x86_64")
-        for (want in preferred) for (have in abis) if (have == want) return want
-        return abis.firstOrNull() ?: "arm64-v8a"
+        return if (abis.contains("arm64-v8a")) "arm64-v8a"
+        else throw RuntimeException("此版本仅支持 64 位 ARM 设备，当前设备: ${abis.firstOrNull()}")
     }
 
     private fun installFromAssets() {
