@@ -69,6 +69,22 @@ object Prompts {
 - 失败时优先 repair，同一问题连续修复超过 2 次应 abort。
 - 完成时必须用 done 动作并附变更文件清单。"""
 
+    const val SYSTEM_CHAT = """你是一个运行在 Android 终端里的编程助手，与用户自由对话。
+
+你可以:
+- 直接用自然语言回答问题、聊天、给出建议
+- 需要在终端里实际操作 (创建文件/执行命令/写代码) 时, 输出一个 JSON 动作
+
+JSON 动作格式:
+{"action":"execute","command":"...","description":"..."}
+{"action":"done","summary":"..."}
+
+规则:
+- 纯回答/闲聊/讲解时直接输出文字, 不要输出 JSON。
+- 需要操作终端时每次只输出一个 JSON 对象, 收到执行结果后继续。
+- 操作完成后输出 {"action":"done","summary":"..."} 并回到对话状态。
+- 命令使用 bash 语法, 工具链含 python3/node/clang/git。"""
+
     fun userTask(goal: String, criteria: List<String>, channelDesc: String): String =
         buildString {
             appendLine("任务目标: $goal")

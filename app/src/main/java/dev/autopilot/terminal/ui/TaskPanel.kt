@@ -105,9 +105,15 @@ private fun GoalInput(vm: AutopilotViewModel) {
     var criteria by remember { mutableStateOf("") }
     var showCriteria by remember { mutableStateOf(false) }
 
-    fun submit() {
+    fun sendChat() {
         if (goal.isBlank()) return
-        val list = criteria.lines().map { it.trim() }.filter { it.isNotEmpty() }
+        vm.engine.chat(goal.trim())
+        goal = ""
+    }
+
+    fun submitTask() {
+        if (goal.isBlank()) return
+        val list = criteria.lines().map { it.trim().filter { c -> c != '\r' } }.filter { it.isNotEmpty() }
         vm.submitTask(goal.trim(), list)
         goal = ""
         criteria = ""
@@ -121,7 +127,7 @@ private fun GoalInput(vm: AutopilotViewModel) {
         OutlinedTextField(
             value = goal,
             onValueChange = { goal = it },
-            placeholder = { Text("描述任务目标...", fontSize = 12.sp) },
+            placeholder = { Text("对话或下达任务...", fontSize = 12.sp) },
             modifier = Modifier.weight(1f),
             textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp, color = Color.White),
             minLines = 1,
@@ -130,14 +136,16 @@ private fun GoalInput(vm: AutopilotViewModel) {
         Spacer(Modifier.width(6.dp))
         OutlinedButton(onClick = { showCriteria = !showCriteria }) { Text("+", fontSize = 14.sp) }
         Spacer(Modifier.width(6.dp))
-        Button(onClick = { submit() }, enabled = goal.isNotBlank()) { Text("启动") }
+        Button(onClick = { sendChat() }, enabled = goal.isNotBlank()) { Text("发送") }
+        Spacer(Modifier.width(6.dp))
+        OutlinedButton(onClick = { submitTask() }, enabled = goal.isNotBlank()) { Text("任务") }
     }
 
     if (showCriteria) {
         OutlinedTextField(
             value = criteria,
             onValueChange = { criteria = it },
-            placeholder = { Text("验收标准（每行一条）", fontSize = 11.sp) },
+            placeholder = { Text("验收标准（每行一条，配合\"任务\"按钮）", fontSize = 11.sp) },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp).height(70.dp),
             textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp, color = Color.White)
         )

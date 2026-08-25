@@ -82,6 +82,7 @@ private fun RealTerminalView(
     AndroidView(
         factory = { ctx ->
             TerminalView(ctx, null).apply {
+                setTextSize((12 * resources.displayMetrics.scaledDensity).toInt())
                 setTerminalViewClient(object : com.termux.view.TerminalViewClient {
                     override fun onScale(scale: Float): Float = scale
                     override fun onSingleTapUp(e: MotionEvent?) {}

@@ -79,7 +79,10 @@ class AgentEngine(
     }
 
     fun submit(goal: String, criteria: List<String>, maxIterations: Int) {
-        if (loopJob?.isActive == true) return
+        if (loopJob?.isActive == true) {
+            say(ChatRole.SYSTEM, "有任务正在执行中，请先等待完成或点击停止")
+            return
+        }
         val channel = channelProvider() ?: run {
             _uiState.value = AgentUiState.Failed("终端会话未就绪，请先完成环境安装")
             say(ChatRole.SYSTEM, "终端环境未就绪，任务未启动")
@@ -203,6 +206,108 @@ class AgentEngine(
         }
     }
 
+    private val chatHistory = mutableListOf<ChatMessage>()
+
+    fun chat(message: String) {
+        if (loopJob?.isActive == true) {
+            say(ChatRole.SYSTEM, "有任务正在执行中，请先等待完成或点击停止")
+            return
+        }
+        say(ChatRole.USER, message)
+
+        loopJob = scope.launch {
+            if (chatHistory.isEmpty()) {
+                chatHistory += ChatMessage("system", Prompts.SYSTEM_CHAT)
+            }
+            chatHistory += ChatMessage("user", message)
+
+            var turns = 0
+            while (turns < CHAT_MAX_TURNS) {
+                turns++
+
+                var fullText = ""
+                var llmError: String? = null
+                llm.chat(chatHistory).collect { ev ->
+                    when (ev) {
+                        is LlmEvent.Completed -> fullText = ev.fullText
+                        is LlmEvent.Failed -> llmError = ev.error
+                        is LlmEvent.Delta -> Unit
+                    }
+                }
+                if (llmError != null) {
+                    say(ChatRole.SYSTEM, "模型调用失败: $llmError")
+                    return@launch
+                }
+
+                val actionObj = parseAction(fullText)
+                if (actionObj == null) {
+                    chatHistory += ChatMessage("assistant", fullText)
+                    say(ChatRole.AI, fullText.trim().take(2000))
+                    _uiState.value = AgentUiState.Idle
+                    return@launch
+                }
+
+                when (actionObj.action) {
+                    "execute", "repair" -> {
+                        val cmd = actionObj.command
+                        if (cmd.isNullOrBlank()) {
+                            chatHistory += ChatMessage("assistant", fullText)
+                            say(ChatRole.AI, fullText.trim().take(2000))
+                            _uiState.value = AgentUiState.Idle
+                            return@launch
+                        }
+                        chatHistory += ChatMessage("assistant", fullText)
+                        val desc = actionObj.description?.take(80) ?: ""
+                        say(ChatRole.CMD, "$cmd" + if (desc.isNotBlank()) "\n# $desc" else "")
+
+                        val channel = channelProvider()
+                        if (channel == null) {
+                            say(ChatRole.SYSTEM, "终端环境未就绪，无法执行命令")
+                            return@launch
+                        }
+                        val verdict = RiskFilter.evaluate(cmd)
+                        if (verdict is RiskFilter.Verdict.Confirm) {
+                            pendingConfirmCommand = cmd
+                            db.auditDao().insert(AuditEntryEntity(taskId = 0L, channelLevel = channel.level, command = cmd, exitCode = null))
+                            _uiState.value = AgentUiState.AwaitConfirm(0L, cmd, verdict.reason)
+                            awaitConfirmDecision()
+                            pendingConfirmCommand = null
+                            if (_uiState.value is AgentUiState.Stopped || _uiState.value is AgentUiState.Failed) return@launch
+                        }
+
+                        _uiState.value = AgentUiState.Executing(0L, 0, 1, cmd, 0)
+                        val result = channel.exec(cmd, COMMAND_TIMEOUT_MS)
+                        db.auditDao().insert(
+                            AuditEntryEntity(taskId = 0L, channelLevel = channel.level, command = cmd, exitCode = result.exitCode)
+                        )
+                        say(ChatRole.OUTPUT, "[exit=${result.exitCode ?: "超时"}] ${result.output.take(600)}")
+                        chatHistory += Prompts.observation(turns, cmd, result.exitCode, result.output)
+                        _uiState.value = AgentUiState.Idle
+                    }
+                    "done" -> {
+                        chatHistory += ChatMessage("assistant", fullText)
+                        say(ChatRole.AI, actionObj.summary ?: "完成")
+                        _uiState.value = AgentUiState.Idle
+                        return@launch
+                    }
+                    else -> {
+                        chatHistory += ChatMessage("assistant", fullText)
+                        say(ChatRole.AI, fullText.trim().take(2000))
+                        _uiState.value = AgentUiState.Idle
+                        return@launch
+                    }
+                }
+            }
+            say(ChatRole.SYSTEM, "本轮连续操作步数已达上限，已回到对话状态")
+            _uiState.value = AgentUiState.Idle
+        }
+    }
+
+    fun clearChat() {
+        chatHistory.clear()
+        _chat.value = emptyList()
+    }
+
     private suspend fun awaitConfirmDecision() {
         val decision = kotlinx.coroutines.withTimeoutOrNull(CONFIRM_TIMEOUT_MS) { confirmChannel.receive() } ?: false
         if (!decision) {
@@ -278,5 +383,6 @@ class AgentEngine(
     companion object {
         const val COMMAND_TIMEOUT_MS = 120_000L
         const val CONFIRM_TIMEOUT_MS = 10 * 60_000L
+        const val CHAT_MAX_TURNS = 15
     }
 }
