@@ -31,7 +31,7 @@ class TermuxChannel(
         val cwd = registryWorkspace()
         val session = registry.createOnce(
             "ai-${counter.incrementAndGet()}",
-            arrayOf("-c", command),
+            arrayOf("sh", "-c", command),
             cwd
         ) ?: return ExecResult(null, "终端环境未就绪，无法执行命令", false)
         activeSession = session

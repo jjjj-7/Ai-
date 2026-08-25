@@ -73,6 +73,7 @@ class BootstrapInstaller private constructor(private val appContext: Context) {
             "PREFIX=${prefix.path}",
             "TMPDIR=${File(prefix, "tmp").path}",
             "HOME=${homeDir.path}",
+            "SHELL=${File(prefix, "bin/bash").path}",
             "LD_LIBRARY_PATH=${File(prefix, "lib").path}",
             "LANG=en_US.UTF-8",
             "TERM=xterm-256color"
