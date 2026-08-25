@@ -87,7 +87,7 @@ class TerminalBuffer(private val maxCols: Int = 500, private val maxLines: Int =
         val parts = raw.split(';').map { it.toIntOrNull() ?: 0 }
         when (cmd) {
             'm' -> applySgr(parts)
-            'J' -> if (parts.getOrNull(0) in intArrayOf(2, 3)) clearScreen()
+            'J' -> if (parts.getOrNull(0) == 2 || parts.getOrNull(0) == 3) clearScreen()
             'K' -> Unit
             'D' -> backspaceN(parts.getOrElse(0) { 1 })
             else -> Unit

@@ -1,0 +1,7 @@
+[
+{
+  "directory": "/workspace/app/.cxx/Debug/1j2x2nf6/x86_64",
+  "command": "/opt/android-sdk/ndk/26.1.10909125/toolchains/llvm/prebuilt/linux-x86_64/bin/clang --target=x86_64-none-linux-android26 --sysroot=/opt/android-sdk/ndk/26.1.10909125/toolchains/llvm/prebuilt/linux-x86_64/sysroot -Dautopilot_pty_EXPORTS -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security  -fno-limit-debug-info  -fPIC -o CMakeFiles/autopilot_pty.dir/pty.c.o -c /workspace/app/src/main/cpp/pty.c",
+  "file": "/workspace/app/src/main/cpp/pty.c"
+}
+]

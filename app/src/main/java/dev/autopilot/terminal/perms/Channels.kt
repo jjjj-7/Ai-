@@ -2,6 +2,8 @@ package dev.autopilot.terminal.perms
 
 import dev.autopilot.terminal.data.ChannelLevel
 import dev.autopilot.terminal.terminal.PtySession
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class PtyChannel(
     private val session: PtySession,
@@ -25,11 +27,32 @@ object ShizukuGate {
     }.getOrDefault(false)
 
     fun hasPermission(): Boolean = runCatching {
-        ShizukuGate::checkPermission.call() == true
+        rikka.shizuku.Shizuku.checkSelfPermission() ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
     }.getOrDefault(false)
 
-    private fun checkPermission(): Boolean =
-        rikka.shizuku.Shizuku.checkSelfPermission() == android.content.pm.PackageManager.PERMISSION_GRANTED
+    fun newProcess(cmd: String): Process? {
+        val shizukuClass = Class.forName("rikka.shizuku.Shizuku")
+
+        val attempt1 = runCatching {
+            val m = shizukuClass.getMethod(
+                "newProcess",
+                Array<String>::class.java, Array<String>::class.java, String::class.java
+            )
+            m.isAccessible = true
+            m.invoke(null, arrayOf("/system/bin/sh", "-c", cmd), null as Array<String>?, null as String?) as Process
+        }.getOrNull()
+        if (attempt1 != null) return attempt1
+
+        val attempt2 = runCatching {
+            val m = shizukuClass.getMethod("newProcess", Array<String>::class.java)
+            m.isAccessible = true
+            m.invoke(null, arrayOf("/system/bin/sh", "-c", cmd)) as Process
+        }.getOrNull()
+        if (attempt2 != null) return attempt2
+
+        return null
+    }
 }
 
 class ShizukuChannel(
@@ -42,13 +65,10 @@ class ShizukuChannel(
     override suspend fun exec(command: String, timeoutMs: Long): ExecResult {
         if (!ShizukuGate.isAvailable()) return ExecResult(null, "Shizuku 服务不可用", false)
         if (!ShizukuGate.hasPermission()) return ExecResult(null, "Shizuku 未授权", false)
-        return withContext(kotlinx.coroutines.Dispatchers.IO) {
+        return withContext(Dispatchers.IO) {
             runCatching {
-                val process = rikka.shizuku.Shizuku.newProcess(
-                    arrayOf("/system/bin/sh", "-c", command),
-                    null,
-                    null
-                )
+                val process = ShizukuGate.newProcess(command)
+                    ?: return@withContext ExecResult(null, "Shizuku 进程创建接口不可用，已降级", false)
                 readProcess(process, timeoutMs)
             }.getOrElse { ExecResult(null, "Shizuku 执行失败: ${it.message}", false) }
         }

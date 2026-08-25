@@ -30,6 +30,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.autopilot.terminal.ui.AccentPurple
 import dev.autopilot.terminal.ui.AutopilotViewModel
 import java.io.File
 
@@ -38,8 +39,26 @@ fun FileTreeScreen(vm: AutopilotViewModel) {
     val root = (vm.getApplication<dev.autopilot.terminal.AutopilotApp>()).workspaceRoot
     var currentDir by remember { mutableStateOf(root) }
     var viewingFile by remember { mutableStateOf<File?>(null) }
+    var transferMsg by remember { mutableStateOf<String?>(null) }
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     Column(Modifier.fillMaxSize()) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+        ) {
+            Text(
+                "工作区",
+                fontSize = 15.sp,
+                color = Color.White,
+                modifier = Modifier.weight(1f)
+            )
+            OutlinedButton(onClick = {
+                val r = dev.autopilot.terminal.data.WorkspaceTransfer.exportToDownloads(context, root)
+                transferMsg = r.fold({ "已导出到: ${it.name}" }, { "导出失败: ${it.message}" })
+            }) { Text("导出") }
+        }
+
         Row(
             Modifier.fillMaxWidth().padding(12.dp),
             verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
@@ -56,6 +75,10 @@ fun FileTreeScreen(vm: AutopilotViewModel) {
                     currentDir = currentDir.parentFile ?: root
                 }) { Text("上级") }
             }
+        }
+
+        transferMsg?.let {
+            Text(it, fontSize = 12.sp, color = AccentPurple, modifier = Modifier.padding(horizontal = 12.dp))
         }
 
         LazyColumn(Modifier.weight(1f)) {

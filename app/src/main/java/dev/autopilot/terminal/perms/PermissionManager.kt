@@ -1,10 +1,8 @@
 package dev.autopilot.terminal.perms
 
-import android.Manifest
 import android.content.Context
-import android.content.pm.PackageManager
 import android.os.Environment
-import androidx.core.content.ContextCompat
+import dev.autopilot.terminal.data.ChannelLevel
 
 class PermissionManager(private val context: Context) {
 

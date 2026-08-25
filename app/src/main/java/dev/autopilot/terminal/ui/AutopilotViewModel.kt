@@ -45,7 +45,7 @@ class AutopilotViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun ensureChannel() {
         if (ptyChannel != null) return
-        val session = registry.byName(AGENT_SESSION)
+        val session = registry.byName(AGENT_SESSION)?.session
             ?: registry.create(AGENT_SESSION)?.session
             ?: return
         ptyChannel = PtyChannel(session, dev.autopilot.terminal.perms.CommandRunner(viewModelScope), viewModelScope)

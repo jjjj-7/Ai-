@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.autopilot.terminal.data.ModelConfig
 import dev.autopilot.terminal.ui.AutopilotViewModel
+import dev.autopilot.terminal.ui.collectAsStateSafe
 
 @Composable
 fun ModelSettingsScreen(vm: AutopilotViewModel) {

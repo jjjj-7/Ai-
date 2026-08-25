@@ -38,7 +38,7 @@ class BootstrapInstaller(
     fun isReady(): Boolean =
         File(prefixDir, "bin/busybox").exists() && File(prefixDir, "bin/bash").exists()
 
-    private fun installInternal(): Result<File> = runCatching {
+    private suspend fun installInternal(): Result<File> = runCatching {
         prefixDir.mkdirs()
         cacheDir.mkdirs()
         packages.forEachIndexed { i, pkg ->

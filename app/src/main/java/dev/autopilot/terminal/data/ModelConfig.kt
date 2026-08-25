@@ -17,7 +17,7 @@ data class ModelConfig(
     fun isComplete(): Boolean =
         baseUrl.isNotBlank() && apiKey.isNotBlank() && model.isNotBlank()
 
-    fun masked(): String = copy(apiKey = if (apiKey.isBlank()) "" else "sk-***")
+    fun masked(): ModelConfig = copy(apiKey = if (apiKey.isBlank()) "" else "sk-***")
 }
 
 interface ConfigStore {

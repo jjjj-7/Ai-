@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 sealed class AgentUiState {
@@ -36,7 +37,7 @@ sealed class AgentUiState {
 }
 
 @Serializable
-private data class AgentAction(
+internal data class AgentAction(
     val action: String,
     val command: String? = null,
     val description: String? = null,
@@ -55,7 +56,7 @@ class AgentEngine(
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val planParser = PlanParser()
-    private val runner = CommandRunner()
+    private val runner = CommandRunner(scope)
 
     private val _uiState = MutableStateFlow<AgentUiState>(AgentUiState.Idle)
     val uiState: StateFlow<AgentUiState> = _uiState

@@ -8,8 +8,8 @@ object RiskFilter {
     }
 
     private val rules: List<Pair<Regex, String>> = listOf(
-        Regex("""rm\s+(-[a-zA-Z]*[rf][a-zA-Z]*\s+)*(/|~|\$HOME|/\*|\.\.)""") to "递归删除根目录或主目录",
-        Regex("""rm\s+-[a-zA-Z]*r[a-zA-Z]*f?[a-zA-Z]*\s+/(usr|etc|bin|sbin|lib|boot|dev|system|data|vendor)"""),
+        Regex("""rm\s+(-[a-zA-Z]*[rf][a-zA-Z]*\s+)*(/|~|\${'$'}HOME|/\*|\.\.)""") to "递归删除根目录或主目录",
+        Regex("""rm\s+-[a-zA-Z]*r[a-zA-Z]*f?[a-zA-Z]*\s+/(usr|etc|bin|sbin|lib|boot|dev|system|data|vendor)""") to "删除系统目录",
         Regex("""mkfs(\.\w+)?\s""") to "文件系统格式化",
         Regex("""dd\s+[^\n]*of=/dev/(sd|hd|mmcblk|nvme|block)""") to "向块设备写入",
         Regex("""chmod\s+-R\s+(777|666|000)\s+/""") to "批量修改系统目录权限",

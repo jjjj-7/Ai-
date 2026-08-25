@@ -25,7 +25,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -77,10 +79,13 @@ fun TerminalScreen(vm: AutopilotViewModel) {
         }
 
         TaskPanel(agentState, vm)
+        val inputScope = rememberCoroutineScope()
         InputLine(
             enabled = bootstrapState is BootstrapInstaller.InstallState.Ready,
             onSend = { line ->
-                active?.session?.writeLine(line)
+                active?.session?.let { session ->
+                    inputScope.launch { session.writeLine(line) }
+                }
             }
         )
     }
@@ -95,7 +100,7 @@ private fun InputLine(enabled: Boolean, onSend: (String) -> Unit) {
     ) {
         Text("$ ", color = AccentGreen, fontFamily = FontFamily.Monospace, fontSize = 14.sp)
         Spacer(Modifier.width(4.dp))
-        androidx.compose.material3.BasicTextField(
+        androidx.compose.foundation.text.BasicTextField(
             value = text,
             onValueChange = { text = it },
             enabled = enabled,
@@ -184,7 +189,7 @@ internal fun renderStyled(text: String, spans: List<Span>): AnnotatedString = bu
         if (end > cursor) {
             val style = SpanStyle(
                 color = ansiColor(s.fg),
-                background = s.bg?.let { ansiColor(it) },
+                background = ansiColor(s.bg),
                 fontWeight = if (s.bold) androidx.compose.ui.text.font.FontWeight.Bold else null,
                 textDecoration = if (s.underline) androidx.compose.ui.text.style.TextDecoration.Underline else null
             )

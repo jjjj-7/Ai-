@@ -1,0 +1,3 @@
+# ninja log v5
+0	369	1787645050417626205	CMakeFiles/autopilot_pty.dir/pty.c.o	ac20d46c778ea661
+369	427	1787645050473626206	/workspace/app/build/intermediates/cxx/Debug/1j2x2nf6/obj/arm64-v8a/libautopilot_pty.so	74965240d0888d7b
