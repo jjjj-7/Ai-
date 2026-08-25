@@ -41,7 +41,7 @@ class TerminalBuffer(private val maxCols: Int = 500, private val maxLines: Int =
     @Volatile var version: Long = 0
         private set
 
-    fun snapshot(): List<StyledLine> = synchronized(lines) { lines.toList() + StyledLine(sb.toString(), currentSpans()) }
+    fun snapshot(): List<StyledLine> = synchronized(this) { lines.toList() + StyledLine(sb.toString(), currentSpans()) }
 
     fun process(data: ByteArray) {
         synchronized(this) {
@@ -139,7 +139,7 @@ class TerminalBuffer(private val maxCols: Int = 500, private val maxLines: Int =
     }
 
     private fun clearScreen() {
-        synchronized(lines) { lines.clear() }
+        lines.clear()
         carriageReturn()
     }
 
@@ -182,10 +182,8 @@ class TerminalBuffer(private val maxCols: Int = 500, private val maxLines: Int =
 
     private fun commitLine() {
         closeOpenSpan()
-        synchronized(lines) {
-            lines.addLast(StyledLine(sb.toString(), pendingSpans.map { it.snapshot(sb.length) }))
-            while (lines.size > maxLines) lines.removeFirst()
-        }
+        lines.addLast(StyledLine(sb.toString(), pendingSpans.map { it.snapshot(sb.length) }))
+        while (lines.size > maxLines) lines.removeFirst()
         sb.setLength(0)
         pendingSpans.clear()
     }

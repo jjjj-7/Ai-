@@ -1,6 +1,7 @@
 package dev.autopilot.terminal.data
 
 import android.content.Context
+import android.os.Build
 import android.os.Environment
 import java.io.File
 import java.io.FileInputStream
@@ -13,7 +14,7 @@ object WorkspaceTransfer {
 
     fun exportToDownloads(context: Context, workspaceRoot: File): Result<File> = runCatching {
         val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-        if (!Environment.isExternalStorageManager()) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
             error("需要所有文件访问权限才能写入下载目录")
         }
         downloads.mkdirs()

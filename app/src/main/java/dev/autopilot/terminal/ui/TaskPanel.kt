@@ -84,7 +84,7 @@ private fun GoalInput(vm: AutopilotViewModel) {
     Spacer(Modifier.height(8.dp))
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
-            "通道: ${vm.perms.channelDescription()}",
+            "通道: " + runCatching { vm.perms.channelDescription() }.getOrDefault("通道检测中"),
             color = Color(0xFF9CA3AF),
             fontSize = 11.sp,
             modifier = Modifier.weight(1f)

@@ -1,5 +1,6 @@
 package dev.autopilot.terminal.ui.settings
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -93,6 +94,35 @@ fun ModelSettingsScreen(vm: AutopilotViewModel) {
         }) {
             Text("保存配置")
         }
+
+        Spacer(Modifier.height(24.dp))
+        CrashLogSection()
+    }
+}
+
+@Composable
+private fun CrashLogSection() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var summary by remember { mutableStateOf("读取中...") }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        summary = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { dev.autopilot.terminal.CrashReporter.readableSummary(context) }.getOrDefault("暂无崩溃记录")
+        }
+    }
+    Text("诊断信息", fontSize = 16.sp, color = Color.White)
+    Spacer(Modifier.height(4.dp))
+    Text("若应用闪退，请把以下内容复制发给开发者。长按文本可全选复制。", fontSize = 11.sp, color = Color(0xFF9CA3AF))
+    Spacer(Modifier.height(6.dp))
+    androidx.compose.foundation.text.selection.SelectionContainer {
+        Text(
+            summary,
+            fontSize = 10.sp,
+            color = Color(0xFFF87171),
+            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+        )
     }
 }
 
