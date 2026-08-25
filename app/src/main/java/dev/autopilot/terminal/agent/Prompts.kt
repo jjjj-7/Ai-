@@ -78,7 +78,15 @@ object Prompts {
 注意:
 - expect 字段描述该步骤成功的可验证标准。
 - 失败时优先 repair，同一问题连续修复超过 2 次应 abort。
-- 完成时必须用 done 动作并附变更文件清单。"""
+- 完成时必须用 done 动作并附变更文件清单。
+
+结果验证铁律 (违反即任务失败):
+- exit=0 只代表命令本身跑完, 不代表操作生效。声明"完成/删除/写入成功"前, 必须执行验证命令拿到证据:
+  - 删除后: ls 目标路径确认 "No such file"
+  - 写入后: cat/wc -c 确认内容与大小
+  - 安装后: which/version 确认可用
+- 输出含 Permission denied / Read-only file system / Operation not permitted 时, 是权限问题, 必须先 repair (检查 ls -ld 目录权限、id 身份), 禁止直接 done 或谎报完成。
+- 命令输出为空且 exit=0 时, 对破坏性/写操作要追加验证步骤再下结论; 严禁凭想象汇报成果。"""
 
     const val SYSTEM_CHAT = """你是一个运行在 Android 终端里的编程助手，与用户自由对话。
 
@@ -99,7 +107,9 @@ JSON 动作格式:
 - 需要操作终端时每次只输出一个 JSON 对象, 收到执行结果后继续。
 - 操作完成后输出 {"action":"done","summary":"..."} 并回到对话状态。
 - 命令使用 bash 语法, 工具链含 python3/node/clang/git。
-- 你确实拥有真实的 root 级别之外的完整 shell 环境; 若用户质疑或环境疑似异常, 主动执行自检命令 (打印 SHELL/PREFIX 变量、列出 Termux bin 目录、id 命令查身份) 并把真实输出发给用户。"""
+- 你确实拥有真实的完整 shell 环境; 若用户质疑或环境疑似异常, 主动执行自检命令 (打印 SHELL/PREFIX 变量、列出 Termux bin 目录、id 命令查身份) 并把真实输出发给用户。
+- 汇报"已完成"前必须验证: 删除后 ls 确认不存在; 写入后 cat 确认内容。看到 Permission denied 说明存储权限未授予, 如实告知用户去 App 文件页点「去开启」, 禁止谎报成功。
+- 用户让你删除文件时: 先 ls -l 该路径拿到存在证据, 删除后再 ls 拿到消失证据, 两步都做完才算完成。"""
 
     fun userTask(goal: String, criteria: List<String>, channelDesc: String): String =
         buildString {
@@ -119,17 +129,32 @@ JSON 动作格式:
             0 -> "成功"
             else -> "失败 exit=$exitCode"
         }
+        val outputLower = outputDigest.lowercase()
+        val warnings = buildList {
+            if (exitCode != null && exitCode != 0) add("上一步已失败, 禁止声明完成, 必须修复或中止")
+            when {
+                "permission denied" in outputLower -> add("检测到权限拒绝: 存储权限可能未授予, 提醒用户到文件页点「去开启」")
+                "read-only file system" in outputLower -> add("目标文件系统只读, 换可写路径或 repair")
+                "no such file" in outputLower -> add("路径不存在, 先 ls 确认真实路径再重试")
+            }
+        }
         return ChatMessage(
             role = "user",
             content = buildString {
                 appendLine("步骤 ${stepIndex + 1} 执行结果:")
                 appendLine("\$ $command")
                 appendLine("状态: $status")
+                if (warnings.isNotEmpty()) {
+                    appendLine("警告: ${warnings.joinToString("; ")}")
+                }
                 if (outputDigest.isNotBlank()) {
                     appendLine("输出:")
                     appendLine(outputDigest)
                 }
-                append("请输出下一个动作 JSON。")
+                append(
+                    if (exitCode != null && exitCode != 0) "请输出 repair 或 abort 动作 JSON。"
+                    else "请输出下一个动作 JSON。"
+                )
             }
         )
     }
