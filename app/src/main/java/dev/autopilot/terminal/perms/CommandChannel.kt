@@ -2,10 +2,6 @@ package dev.autopilot.terminal.perms
 
 import dev.autopilot.terminal.data.ChannelLevel
 import dev.autopilot.terminal.llm.ChatMessage
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
 enum class ChannelKind { PTY, SHIZUKU }
 
@@ -47,37 +43,7 @@ class OutputCollector {
     }
 }
 
-class CommandRunner(
-    private val scope: CoroutineScope
-) {
-
-    suspend fun runInPty(
-        session: dev.autopilot.terminal.terminal.PtySession,
-        command: String,
-        timeoutMs: Long
-    ): ExecResult {
-        if (!session.isAlive()) return ExecResult(null, "终端会话已退出", false)
-
-        val collector = OutputCollector()
-        val sub = scope.launch {
-            session.output.collect { collector.onChunk(it) }
-        }
-        try {
-            session.writeLine("${command}; echo ${OutputCollector.EXIT_MARKER}\$?__")
-            val deadline = System.currentTimeMillis() + timeoutMs
-            while (System.currentTimeMillis() < deadline) {
-                collector.pollExitCode()?.let { code ->
-                    delay(150)
-                    return ExecResult(code, digest(collector.text()), false)
-                }
-                delay(100)
-            }
-            return ExecResult(null, digest(collector.text()), true)
-        } finally {
-            sub.cancel()
-        }
-    }
-
+class CommandRunner {
     internal fun digest(text: String): String {
         val clean = text.replace(OutputCollector.MARKER_REGEX, "").trim()
         if (clean.length <= MAX_OUTPUT_CHARS) return clean

@@ -36,6 +36,14 @@ sealed class AgentUiState {
     data class Failed(val reason: String) : AgentUiState()
 }
 
+enum class ChatRole { USER, AI, CMD, OUTPUT, SYSTEM }
+
+data class ChatEntry(
+    val role: ChatRole,
+    val text: String,
+    val ts: Long = System.currentTimeMillis()
+)
+
 @Serializable
 internal data class AgentAction(
     val action: String,
@@ -56,25 +64,34 @@ class AgentEngine(
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val planParser = PlanParser()
-    private val runner = CommandRunner(scope)
 
     private val _uiState = MutableStateFlow<AgentUiState>(AgentUiState.Idle)
     val uiState: StateFlow<AgentUiState> = _uiState
 
+    private val _chat = MutableStateFlow<List<ChatEntry>>(emptyList())
+    val chat: StateFlow<List<ChatEntry>> = _chat
+
     @Volatile private var pendingConfirmCommand: String? = null
     private var loopJob: Job? = null
+
+    private fun say(role: ChatRole, text: String) {
+        _chat.value = (_chat.value + ChatEntry(role, text)).takeLast(300)
+    }
 
     fun submit(goal: String, criteria: List<String>, maxIterations: Int) {
         if (loopJob?.isActive == true) return
         val channel = channelProvider() ?: run {
-            _uiState.value = AgentUiState.Failed("终端会话未就绪，请先完成 Bootstrap 安装")
+            _uiState.value = AgentUiState.Failed("终端会话未就绪，请先完成环境安装")
+            say(ChatRole.SYSTEM, "终端环境未就绪，任务未启动")
             return
         }
+        say(ChatRole.USER, goal)
 
         loopJob = scope.launch {
             val task = TaskEntity(goal = goal, criteriaJson = json.encodeToString(criteria))
             val taskId = db.taskDao().insert(task)
             _uiState.value = AgentUiState.Planning(taskId)
+            say(ChatRole.SYSTEM, "正在制定执行计划...")
             val startedAt = System.currentTimeMillis()
 
             val messages = mutableListOf(
@@ -124,11 +141,22 @@ class AgentEngine(
                         if (p.steps.isEmpty()) { failTask(taskId, "计划为空"); return@launch }
                         plan = p
                         _uiState.value = AgentUiState.Executing(taskId, 0, p.steps.size, "", iteration)
+                        say(ChatRole.AI, "已制定 ${p.steps.size} 步执行计划:")
+                        p.steps.take(8).forEachIndexed { i, s ->
+                            say(ChatRole.AI, "${i + 1}. ${s.description.ifBlank { s.command }}")
+                        }
+                        if (p.steps.size > 8) say(ChatRole.AI, "... 共 ${p.steps.size} 步")
                         messages += ChatMessage("assistant", fullText)
                     }
                     "execute", "repair" -> {
                         val cmd = action.command ?: run { failTask(taskId, "动作缺少 command 字段"); return@launch }
                         messages += ChatMessage("assistant", fullText)
+                        say(
+                            if (action.action == "repair") ChatRole.AI else ChatRole.CMD,
+                            if (action.action == "repair")
+                                "修复: $cmd\n原因: ${action.reason ?: ""}"
+                            else "\$ $cmd"
+                        )
 
                         val verdict = RiskFilter.evaluate(cmd)
                         if (verdict is RiskFilter.Verdict.Confirm) {
@@ -148,13 +176,19 @@ class AgentEngine(
                         db.auditDao().insert(
                             AuditEntryEntity(taskId = taskId, channelLevel = channel.level, command = cmd, exitCode = result.exitCode)
                         )
+                        say(
+                            ChatRole.OUTPUT,
+                            "[exit=${result.exitCode ?: "超时"}] ${result.output.take(600)}"
+                        )
                         messages += Prompts.observation(stepCounter - 1, cmd, result.exitCode, result.output)
                     }
                     "done" -> {
+                        say(ChatRole.AI, "任务完成: ${action.summary ?: ""}")
                         finishTask(taskId, action.summary ?: "任务完成", action.changed_files ?: emptyList(), startedAt, channel.level)
                         return@launch
                     }
                     "abort" -> {
+                        say(ChatRole.AI, "主动中止: ${action.reason ?: "未说明"}")
                         stopTask(taskId, "AI 主动中止: ${action.reason ?: "未说明"}")
                         return@launch
                     }
@@ -218,6 +252,7 @@ class AgentEngine(
     }
 
     private suspend fun stopTask(taskId: Long, message: String) {
+        say(ChatRole.SYSTEM, message)
         db.taskDao().byId(taskId)?.let { t ->
             db.taskDao().update(t.copy(status = TaskStatus.STOPPED, reportSummary = message, finishedAt = System.currentTimeMillis()))
         }
@@ -225,6 +260,7 @@ class AgentEngine(
     }
 
     private suspend fun failTask(taskId: Long, reason: String) {
+        say(ChatRole.SYSTEM, "任务失败: $reason")
         db.taskDao().byId(taskId)?.let { t ->
             db.taskDao().update(t.copy(status = TaskStatus.FAILED, reportSummary = reason, finishedAt = System.currentTimeMillis()))
         }

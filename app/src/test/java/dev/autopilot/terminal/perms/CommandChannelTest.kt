@@ -27,14 +27,14 @@ class OutputCollectorAndDigestTest {
 
     @Test
     fun digestKeepsShortOutputAsIs() {
-        val r = CommandRunner(kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined))
+        val r = CommandRunner()
         val text = "line1\nline2"
         assertEquals(text, r.digest(text))
     }
 
     @Test
     fun digestTruncatesLongOutputKeepingHeadAndTail() {
-        val r = CommandRunner(kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined))
+        val r = CommandRunner()
         val head = "H".repeat(5000)
         val tail = "T".repeat(5000)
         val out = r.digest("$head\n$tail")
@@ -46,7 +46,7 @@ class OutputCollectorAndDigestTest {
 
     @Test
     fun markerRegexRemovesMarkerFromDigest() {
-        val r = CommandRunner(kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined))
+        val r = CommandRunner()
         val cleaned = r.digest("done __EXIT_CODE:0__")
         assertFalse(cleaned.contains("__EXIT_CODE"))
         assertTrue(cleaned.contains("done"))

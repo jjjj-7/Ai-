@@ -7,18 +7,20 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,29 +32,78 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.autopilot.terminal.agent.AgentUiState
+import dev.autopilot.terminal.agent.ChatEntry
+import dev.autopilot.terminal.agent.ChatRole
+
+private val RoleColor = mapOf(
+    ChatRole.USER to Color.White,
+    ChatRole.AI to AccentGreen,
+    ChatRole.CMD to Color(0xFFFBBF24),
+    ChatRole.OUTPUT to Color(0xFF9CA3AF),
+    ChatRole.SYSTEM to AccentAmber
+)
 
 @Composable
-fun TaskPanel(state: AgentUiState, vm: AutopilotViewModel) {
-    Surface(color = TerminalSurface, tonalElevation = 2.dp) {
-        Column(Modifier.fillMaxWidth().padding(12.dp)) {
-            when (state) {
-                is AgentUiState.Idle -> GoalInput(vm)
-                is AgentUiState.Planning -> StatusRow("AI 正在制定执行计划...")
-                is AgentUiState.Executing -> ExecutingPanel(state, vm)
-                is AgentUiState.AwaitConfirm -> ConfirmDialog(state, vm)
-                is AgentUiState.PausedLimit -> LimitPanel(vm)
-                is AgentUiState.Done -> ReportPanel(state.summary, state.changedFiles, state.elapsedMs, state.degraded)
-                is AgentUiState.Stopped -> StoppedPanel(state.message, vm)
-                is AgentUiState.Failed -> FailedPanel(state.reason, vm)
+fun ChatPanel(vm: AutopilotViewModel) {
+    val state by vm.engine.uiState.collectAsStateSafe()
+    val chat by vm.engine.chat.collectAsStateSafe()
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(chat.size) {
+        if (chat.isNotEmpty()) listState.animateScrollToItem(chat.size - 1)
+    }
+
+    Surface {
+        Column(Modifier.fillMaxWidth().heightIn(min = 180.dp, max = 300.dp).background(TerminalSurface)) {
+            when (val s = state) {
+                is AgentUiState.Planning -> StatusRow("AI 正在制定执行计划...", s)
+                is AgentUiState.Executing -> ExecutingHeader(s, vm)
+                is AgentUiState.AwaitConfirm -> ConfirmDialog(s, vm)
+                is AgentUiState.PausedLimit -> LimitRow(vm)
+                is AgentUiState.Done -> DoneRow(s.summary)
+                else -> Unit
             }
+
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                if (chat.isEmpty()) {
+                    item {
+                        Text(
+                            "输入任务目标，AI 将在终端中自动完成。所有执行过程在此可见。",
+                            color = Color(0xFF6B7280), fontSize = 12.sp
+                        )
+                    }
+                }
+                items(chat) { entry -> ChatBubble(entry) }
+            }
+
+            GoalInput(vm)
         }
     }
+}
+
+@Composable
+private fun ChatBubble(entry: ChatEntry) {
+    val color = RoleColor[entry.role] ?: Color.Gray
+    val mono = entry.role == ChatRole.CMD || entry.role == ChatRole.OUTPUT
+    Text(
+        text = entry.text.take(1500),
+        color = color,
+        fontSize = if (entry.role == ChatRole.OUTPUT) 10.sp else 12.sp,
+        lineHeight = if (entry.role == ChatRole.OUTPUT) 13.sp else 16.sp,
+        fontFamily = if (mono) FontFamily.Monospace else FontFamily.Default
+    )
 }
 
 @Composable
 private fun GoalInput(vm: AutopilotViewModel) {
     var goal by remember { mutableStateOf("") }
     var criteria by remember { mutableStateOf("") }
+    var showCriteria by remember { mutableStateOf(false) }
 
     fun submit() {
         if (goal.isBlank()) return
@@ -60,69 +111,59 @@ private fun GoalInput(vm: AutopilotViewModel) {
         vm.submitTask(goal.trim(), list)
         goal = ""
         criteria = ""
+        showCriteria = false
     }
 
-    OutlinedTextField(
-        value = goal,
-        onValueChange = { goal = it },
-        placeholder = { Text("描述你的任务目标，例如: 用 Python 写一个 TODO CLI 并自测", fontSize = 13.sp) },
-        modifier = Modifier.fillMaxWidth(),
-        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp, color = Color.White),
-        minLines = 1,
-        maxLines = 3
-    )
-    Spacer(Modifier.height(6.dp))
-    OutlinedTextField(
-        value = criteria,
-        onValueChange = { criteria = it },
-        placeholder = { Text("验收标准(可选，每行一条)", fontSize = 12.sp) },
-        modifier = Modifier.fillMaxWidth(),
-        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp, color = Color.White),
-        minLines = 1,
-        maxLines = 2
-    )
-    Spacer(Modifier.height(8.dp))
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            "通道: " + runCatching { vm.perms.channelDescription() }.getOrDefault("通道检测中"),
-            color = Color(0xFF9CA3AF),
-            fontSize = 11.sp,
-            modifier = Modifier.weight(1f)
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        OutlinedTextField(
+            value = goal,
+            onValueChange = { goal = it },
+            placeholder = { Text("描述任务目标...", fontSize = 12.sp) },
+            modifier = Modifier.weight(1f),
+            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp, color = Color.White),
+            minLines = 1,
+            maxLines = 2
         )
-        Button(onClick = { submit() }, enabled = goal.isNotBlank()) {
-            Text("启动自动驾驶")
-        }
+        Spacer(Modifier.width(6.dp))
+        OutlinedButton(onClick = { showCriteria = !showCriteria }) { Text("+", fontSize = 14.sp) }
+        Spacer(Modifier.width(6.dp))
+        Button(onClick = { submit() }, enabled = goal.isNotBlank()) { Text("启动") }
+    }
+
+    if (showCriteria) {
+        OutlinedTextField(
+            value = criteria,
+            onValueChange = { criteria = it },
+            placeholder = { Text("验收标准（每行一条）", fontSize = 11.sp) },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp).height(70.dp),
+            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp, color = Color.White)
+        )
     }
 }
 
 @Composable
-private fun StatusRow(text: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
+private fun StatusRow(text: String, state: AgentUiState.Planning) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 12.dp)) {
         LinearProgressIndicator(Modifier.width(80.dp))
         Spacer(Modifier.width(10.dp))
-        Text(text, color = Color(0xFFD1D5DB), fontSize = 13.sp)
+        Text(text, color = Color(0xFFD1D5DB), fontSize = 12.sp)
     }
 }
 
 @Composable
-private fun ExecutingPanel(state: AgentUiState.Executing, vm: AutopilotViewModel) {
-    Column {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            LinearProgressIndicator(Modifier.weight(1f))
-            Spacer(Modifier.width(10.dp))
-            Text("第 ${state.iteration} 轮 · 步骤 ${state.stepIndex + 1}/${state.totalSteps}", color = AccentGreen, fontSize = 12.sp)
-            Spacer(Modifier.width(8.dp))
-            OutlinedButton(onClick = { vm.engine.stop() }) { Text("停止") }
-        }
-        if (state.command.isNotBlank()) {
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "\$ ${state.command.take(120)}",
-                fontFamily = FontFamily.Monospace,
-                color = Color(0xFF9CA3AF),
-                fontSize = 11.sp
-            )
-        }
+private fun ExecutingHeader(state: AgentUiState.Executing, vm: AutopilotViewModel) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 12.dp)) {
+        LinearProgressIndicator(Modifier.weight(1f))
+        Spacer(Modifier.width(10.dp))
+        Text(
+            "第 ${state.iteration} 轮 · ${state.stepIndex + 1}/${state.totalSteps}",
+            color = AccentGreen, fontSize = 11.sp
+        )
+        Spacer(Modifier.width(8.dp))
+        OutlinedButton(onClick = { vm.engine.stop() }) { Text("停止", fontSize = 11.sp) }
     }
 }
 
@@ -144,46 +185,24 @@ private fun ConfirmDialog(state: AgentUiState.AwaitConfirm, vm: AutopilotViewMod
 }
 
 @Composable
-private fun LimitPanel(vm: AutopilotViewModel) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-        Text("已达到自动迭代轮数上限，任务暂停。", color = AccentAmber, fontSize = 13.sp, modifier = Modifier.weight(1f))
+private fun LimitRow(vm: AutopilotViewModel) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+        Text("已达迭代上限", color = AccentAmber, fontSize = 12.sp, modifier = Modifier.weight(1f))
         OutlinedButton(onClick = { vm.engine.stop("任务已归档") }) { Text("结束") }
     }
 }
 
 @Composable
-private fun ReportPanel(summary: String, files: List<String>, elapsedMs: Long, degraded: Boolean) {
-    Column {
-        Text("任务完成", color = AccentGreen, fontSize = 15.sp)
-        Spacer(Modifier.height(4.dp))
-        Text(summary, color = Color(0xFFE5E5E5), fontSize = 13.sp)
-        if (files.isNotEmpty()) {
-            Spacer(Modifier.height(6.dp))
-            Text("变更文件:", color = Color(0xFF9CA3AF), fontSize = 12.sp)
-            files.forEach { f ->
-                Text("  $f", color = AccentPurple, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
-            }
-        }
-        Spacer(Modifier.height(4.dp))
-        val degradeNote = if (degraded) " (沙箱级通道)" else ""
-        Text("耗时 ${elapsedMs / 1000}s$degradeNote", color = Color(0xFF9CA3AF), fontSize = 11.sp)
-    }
+private fun DoneRow(summary: String) {
+    Text(
+        "完成: $summary",
+        color = AccentGreen, fontSize = 12.sp,
+        modifier = Modifier.padding(horizontal = 12.dp),
+        maxLines = 3
+    )
 }
 
 @Composable
-private fun StoppedPanel(message: String, vm: AutopilotViewModel) {
-    Column {
-        Text(message, color = AccentAmber, fontSize = 13.sp)
-        Spacer(Modifier.height(6.dp))
-        Button(onClick = { vm.engineReset() }) { Text("新任务") }
-    }
-}
-
-@Composable
-private fun FailedPanel(reason: String, vm: AutopilotViewModel) {
-    Column {
-        Text("失败: $reason", color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
-        Spacer(Modifier.height(6.dp))
-        Button(onClick = { vm.engineReset() }) { Text("重新开始") }
-    }
+private fun Surface(content: @Composable () -> Unit) {
+    androidx.compose.material3.Surface(color = TerminalSurface, tonalElevation = 2.dp) { content() }
 }

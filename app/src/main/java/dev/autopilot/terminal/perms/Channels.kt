@@ -1,24 +1,8 @@
 package dev.autopilot.terminal.perms
 
 import dev.autopilot.terminal.data.ChannelLevel
-import dev.autopilot.terminal.terminal.PtySession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-
-class PtyChannel(
-    private val session: PtySession,
-    private val runner: CommandRunner,
-    private val scope: kotlinx.coroutines.CoroutineScope
-) : CommandChannel {
-
-    override val kind: ChannelKind = ChannelKind.PTY
-    override val level: ChannelLevel = ChannelLevel.SANDBOX
-
-    override suspend fun exec(command: String, timeoutMs: Long): ExecResult =
-        runner.runInPty(session, command, timeoutMs)
-
-    override fun close() = session.close()
-}
 
 object ShizukuGate {
 

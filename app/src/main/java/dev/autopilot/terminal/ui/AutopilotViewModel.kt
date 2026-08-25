@@ -8,8 +8,7 @@ import dev.autopilot.terminal.data.EncryptedConfigStore
 import dev.autopilot.terminal.data.ModelConfig
 import dev.autopilot.terminal.agent.AgentEngine
 import dev.autopilot.terminal.llm.LlmClient
-import dev.autopilot.terminal.perms.PtyChannel
-import dev.autopilot.terminal.perms.PermissionManager
+import dev.autopilot.terminal.perms.TermuxChannel
 import dev.autopilot.terminal.terminal.SessionRegistry
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -19,27 +18,19 @@ class AutopilotViewModel(app: Application) : AndroidViewModel(app) {
 
     val configStore = EncryptedConfigStore(app)
     val installer = BootstrapInstaller.get(app)
-    val perms = PermissionManager(app)
-    val registry = SessionRegistry(
-        envProvider = {
-            val cwd = (app as dev.autopilot.terminal.AutopilotApp).workspaceRoot
-            installer.envSpec(cwd)
-        }
-    )
+    val registry = SessionRegistry(installer, (app as dev.autopilot.terminal.AutopilotApp).workspaceRoot)
+    val channel = TermuxChannel(registry, viewModelScope)
     val llm = LlmClient(configProvider = { configStore.load() })
     val db = dev.autopilot.terminal.data.AppDatabase.get(app)
-
-    private var ptyChannel: PtyChannel? = null
 
     val engine = AgentEngine(
         scope = viewModelScope,
         llm = llm,
         db = db,
-        channelProvider = {
-            runCatching { ensureChannel() }
-            ptyChannel?.takeIf { it.kind == dev.autopilot.terminal.perms.ChannelKind.PTY }
-        },
-        channelDescProvider = { runCatching { perms.channelDescription() }.getOrDefault("通道检测中") }
+        channelProvider = { channel.takeIf { installer.isReady() } },
+        channelDescProvider = {
+            if (installer.isReady()) "Termux 用户态 / 完整工具链" else "环境安装中"
+        }
     )
 
     private val _riskAccepted = MutableStateFlow(false)
@@ -49,6 +40,7 @@ class AutopilotViewModel(app: Application) : AndroidViewModel(app) {
     val config: StateFlow<ModelConfig> = _config
 
     init {
+        channel.bindWorkspace { (getApplication<dev.autopilot.terminal.AutopilotApp>()).workspaceRoot.absolutePath }
         viewModelScope.launch {
             runCatching { ensureBootstrap() }
                 .onFailure { android.util.Log.e(TAG, "bootstrap failed", it) }
@@ -73,14 +65,6 @@ class AutopilotViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun ensureBootstrap() {
         if (installer.isReady()) return
         installer.ensureInstalled()
-    }
-
-    private fun ensureChannel() {
-        if (ptyChannel != null) return
-        val session = registry.byName(AGENT_SESSION)?.session
-            ?: registry.create(AGENT_SESSION)?.session
-            ?: return
-        ptyChannel = PtyChannel(session, dev.autopilot.terminal.perms.CommandRunner(viewModelScope), viewModelScope)
     }
 
     fun submitTask(goal: String, criteria: List<String>) {

@@ -1,26 +1,23 @@
 package dev.autopilot.terminal.bootstrap
 
 import android.content.Context
+import android.os.Build
+import android.system.Os
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.zip.ZipInputStream
 
-class BootstrapInstaller(
-    private val context: Context,
-    private val source: BootstrapSource = TermuxRepoSource(),
-    private val packages: List<String> = DEFAULT_PACKAGES
-) {
-    val prefixDir: File get() = File(context.filesDir, "usr")
-    private val cacheDir: File get() = File(context.cacheDir, "debs")
+class BootstrapInstaller private constructor(private val appContext: Context) {
+
+    val prefix: File = File(appContext.filesDir, "usr")
+    val homeDir: File = File(appContext.filesDir, "home")
 
     sealed class InstallState {
         data object Idle : InstallState()
-        data class Downloading(val pkg: String, val index: Int, val total: Int) : InstallState()
-        data object Extracting : InstallState()
+        data object Installing : InstallState()
         data object Ready : InstallState()
         data class Failed(val reason: String) : InstallState()
     }
@@ -28,75 +25,102 @@ class BootstrapInstaller(
     private val _state = MutableStateFlow<InstallState>(InstallState.Idle)
     val state: StateFlow<InstallState> = _state
 
-    private val mutex = Mutex()
-
-    suspend fun ensureInstalled(): Result<File> = mutex.withLock {
-        if (isReady()) return Result.success(prefixDir)
-        withContext(Dispatchers.IO) { installInternal() }
+    suspend fun ensureInstalled() = withContext(Dispatchers.IO) {
+        if (_state.value is InstallState.Ready) return@withContext
+        _state.value = InstallState.Installing
+        try {
+            if (isReady()) {
+                _state.value = InstallState.Ready
+                return@withContext
+            }
+            installFromAssets()
+            _state.value = if (isReady()) InstallState.Ready
+            else InstallState.Failed("bootstrap 解压完成但 bash 缺失")
+        } catch (t: Throwable) {
+            _state.value = InstallState.Failed(t.message ?: t.javaClass.simpleName)
+        }
     }
 
-    fun isReady(): Boolean =
-        File(prefixDir, "bin/busybox").exists() && File(prefixDir, "bin/bash").exists()
+    fun isReady(): Boolean = runCatching { File(prefix, "bin/bash").canExecute() }.getOrDefault(false)
 
-    private suspend fun installInternal(): Result<File> = runCatching {
-        prefixDir.mkdirs()
-        cacheDir.mkdirs()
-        packages.forEachIndexed { i, pkg ->
-            _state.value = InstallState.Downloading(pkg, i + 1, packages.size)
-            val deb = File(cacheDir, "$pkg.deb")
-            if (!deb.exists()) source.fetch(pkg, deb).getOrThrow()
-        }
-        _state.value = InstallState.Extracting
-        packages.forEach { pkg ->
-            val deb = File(cacheDir, "$pkg.deb")
-            DebExtractor.extract(deb, prefixDir)
-        }
-        writeEnvScript()
-        check(isReady()) { "bootstrap extraction finished but core binaries missing" }
-        _state.value = InstallState.Ready
-        prefixDir
-    }.onFailure { _state.value = InstallState.Failed(it.message ?: "unknown") }
-
-    fun envSpec(cwd: File, cols: Int = 100, rows: Int = 30): BootstrapEnvSpec {
-        val bin = File(prefixDir, "bin").absolutePath
-        val tmp = File(prefixDir, "tmp").apply { mkdirs() }.absolutePath
-        val home = cwd.absolutePath
-        val envp = listOf(
-            "PATH=$bin:/system/bin:/system/xbin",
-            "HOME=$home",
-            "PREFIX=$prefixDir",
-            "TMPDIR=$tmp",
-            "LD_LIBRARY_PATH=${File(prefixDir, "lib")}",
+    fun envSpec(cwd: String): Array<String> {
+        val path = System.getenv("PATH") ?: "/system/bin"
+        return arrayOf(
+            "PATH=${File(prefix, "bin").path}:$path",
+            "PREFIX=${prefix.path}",
+            "TMPDIR=${File(prefix, "tmp").path}",
+            "HOME=${homeDir.path}",
+            "LD_LIBRARY_PATH=${File(prefix, "lib").path}",
             "LANG=en_US.UTF-8",
             "TERM=xterm-256color"
         )
-        return BootstrapEnvSpec(
-            shellPath = File(bin, "bash").takeIf { it.exists() }?.absolutePath ?: "/system/bin/sh",
-            argv = listOf("-l"),
-            envp = envp,
-            cwd = home,
-            cols = cols,
-            rows = rows
-        )
     }
 
-    private fun writeEnvScript() {
-        File(prefixDir, "etc/profile.d/autopilot.sh").parentFile?.mkdirs()
-        File(prefixDir, "etc/profile.d/autopilot.sh").writeText("export PATH=\$PREFIX/bin:\$PATH\n")
+    private fun archName(): String {
+        val abis = Build.SUPPORTED_ABIS
+        val preferred = listOf("arm64-v8a", "x86_64")
+        for (want in preferred) for (have in abis) if (have == want) return want
+        return abis.firstOrNull() ?: "arm64-v8a"
+    }
+
+    private fun installFromAssets() {
+        val staging = File(appContext.filesDir, "staging-usr-tmp")
+        staging.deleteRecursively()
+        staging.mkdirs()
+
+        val assetName = "bootstrap-${archName()}.zip"
+        appContext.assets.open(assetName).use { input ->
+            ZipInputStream(input.buffered()).use { zis ->
+                while (true) {
+                    val entry = zis.nextEntry ?: break
+                    val target = File(staging, entry.name)
+                    if (!target.canonicalPath.startsWith(staging.canonicalPath + File.separator) &&
+                        target.canonicalPath != staging.canonicalPath
+                    ) continue
+                    if (entry.isDirectory) {
+                        target.mkdirs()
+                    } else {
+                        target.parentFile?.mkdirs()
+                        java.io.FileOutputStream(target).use { out -> zis.copyTo(out) }
+                        if (entry.name.startsWith("bin/") ||
+                            entry.name.startsWith("libexec") ||
+                            entry.name.startsWith("lib/apt/apt-helper") ||
+                            entry.name.startsWith("lib/apt/methods")
+                        ) {
+                            runCatching { Os.chmod(target.absolutePath, 448) }
+                        }
+                    }
+                    zis.closeEntry()
+                }
+            }
+        }
+
+        val symlinksFile = File(staging, "SYMLINKS.txt")
+        if (!symlinksFile.isFile) throw RuntimeException("SYMLINKS.txt 缺失")
+        symlinksFile.useLines { lines ->
+            lines.forEach { line ->
+                val parts = line.split("←")
+                if (parts.size == 2) {
+                    val linkPath = File(staging, parts[1].trim())
+                    linkPath.parentFile?.mkdirs()
+                    runCatching { linkPath.delete() }
+                    runCatching { Os.symlink(parts[0].trim(), linkPath.absolutePath) }
+                }
+            }
+        }
+
+        if (prefix.exists()) prefix.deleteRecursively()
+        if (!staging.renameTo(prefix)) throw RuntimeException("staging 重命名失败")
+        File(prefix, "tmp").mkdirs()
+        homeDir.mkdirs()
     }
 
     companion object {
-        val DEFAULT_PACKAGES = listOf(
-            "busybox", "coreutils", "bash", "libandroid-support",
-            "ncurses-utils", "readline", "git", "clang", "python", "nodejs"
-        )
-
         @Volatile private var instance: BootstrapInstaller? = null
 
-        fun get(context: Context): BootstrapInstaller = instance ?: synchronized(this) {
-            instance ?: BootstrapInstaller(context.applicationContext).also { instance = it }
-        }
+        fun get(app: Context): BootstrapInstaller =
+            instance ?: synchronized(this) {
+                instance ?: BootstrapInstaller(app.applicationContext).also { instance = it }
+            }
     }
 }
-
-typealias BootstrapEnvSpec = dev.autopilot.terminal.terminal.ShellEnvSpec
