@@ -131,6 +131,32 @@ class AutopilotViewModel(app: Application) : AndroidViewModel(app) {
         engine.submit(goal, criteria, _config.value.maxIterations)
     }
 
+    fun suggestFiles(query: String, limit: Int = 20): List<String> {
+        val root = appCtx.workspaceRoot
+        val q = query.lowercase()
+        val results = mutableListOf<String>()
+        val exclude = setOf("node_modules", ".git", "build", ".gradle", "__pycache__", ".idea", "dist", "target")
+        fun walk(dir: java.io.File, depth: Int) {
+            if (results.size >= limit || depth > 4) return
+            val files = dir.listFiles() ?: return
+            for (f in files) {
+                if (results.size >= limit) return
+                if (f.name.startsWith(".") && depth > 0) continue
+                if (f.name in exclude) continue
+                val rel = f.relativeTo(root).path
+                if (f.isDirectory) {
+                    walk(f, depth + 1)
+                } else {
+                    if (q.isEmpty() || rel.lowercase().contains(q)) {
+                        results.add(rel)
+                    }
+                }
+            }
+        }
+        walk(root, 0)
+        return results
+    }
+
     fun engineReset() {
         engine.reset()
     }

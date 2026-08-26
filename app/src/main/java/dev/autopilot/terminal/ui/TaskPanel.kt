@@ -852,7 +852,7 @@ private fun GoalInput(vm: AutopilotViewModel, busy: Boolean) {
                 decorationBox = { inner ->
                     Box {
                         if (goal.isEmpty()) {
-                            Text("输入指令... (/ 命令, ↑↓ 历史)", fontSize = 12.sp, color = Color(0xFF565F73))
+                            Text("输入指令... (/ 命令, @ 文件, ↑↓ 历史)", fontSize = 12.sp, color = Color(0xFF565F73))
                         }
                         inner()
                         if (goal.startsWith("/") && goal.length <= 15 && !goal.contains(" ")) {
@@ -873,6 +873,32 @@ private fun GoalInput(vm: AutopilotViewModel, busy: Boolean) {
                                             Text(sc.icon, color = AccentPurple, fontSize = 12.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.width(28.dp))
                                             Text(sc.cmd, color = AccentGreen, fontSize = 12.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, modifier = Modifier.width(60.dp))
                                             Text(sc.desc, color = TextDim, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        val atIdx = goal.lastIndexOf('@')
+                        if (atIdx >= 0 && atIdx > 0 && goal[atIdx - 1] == ' ') {
+                            val query = goal.substring(atIdx + 1)
+                            if (!query.contains(' ') && query.length <= 30) {
+                                val files = vm.suggestFiles(query)
+                                if (files.isNotEmpty()) {
+                                    DropdownMenu(
+                                        expanded = true,
+                                        onDismissRequest = {},
+                                        modifier = Modifier.background(WinSurface).border(1.dp, AccentPurple.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                                    ) {
+                                        Text("@文件", color = AccentPurple, fontSize = 10.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
+                                        files.take(8).forEach { path ->
+                                            Row(
+                                                Modifier.fillMaxWidth().clickable {
+                                                    goal = goal.substring(0, atIdx + 1) + path + " "
+                                                }.padding(horizontal = 12.dp, vertical = 5.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                    Text(path, color = Color(0xFF7EE3C8), fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                            }
                                         }
                                     }
                                 }
