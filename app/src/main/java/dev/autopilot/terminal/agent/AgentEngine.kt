@@ -45,6 +45,9 @@ data class ChatEntry(
 )
 
 @Serializable
+internal data class ActionTodoItem(val text: String, val done: Boolean = false)
+
+@Serializable
 internal data class AgentAction(
     val action: String,
     val command: String? = null,
@@ -52,7 +55,8 @@ internal data class AgentAction(
     val reason: String? = null,
     val steps: List<PlanStep>? = null,
     val summary: String? = null,
-    val changed_files: List<String>? = null
+    val changed_files: List<String>? = null,
+    val items: List<ActionTodoItem>? = null
 )
 
 class AgentEngine(
@@ -74,14 +78,25 @@ class AgentEngine(
     private val _busy = MutableStateFlow(false)
     val busy: StateFlow<Boolean> = _busy
 
+    data class TodoItem(val text: String, val done: Boolean)
+    private val _todos = MutableStateFlow<List<TodoItem>>(emptyList())
+    val todos: StateFlow<List<TodoItem>> = _todos
+
+    @Volatile var memoryProvider: () -> String = { "" }
+
     @Volatile private var pendingConfirmCommand: String? = null
     private var loopJob: Job? = null
 
     @Volatile var skillsProvider: () -> String = { "" }
 
     private fun systemMessage(base: String): ChatMessage {
-        val skills = runCatching { skillsProvider() }.getOrDefault("")
-        return ChatMessage("system", if (skills.isBlank()) base else base + "\n\n" + skills)
+        val extra = buildString {
+            val skills = runCatching { skillsProvider() }.getOrDefault("")
+            if (skills.isNotBlank()) append("\n\n").append(skills)
+            val memory = runCatching { memoryProvider() }.getOrDefault("")
+            if (memory.isNotBlank()) append("\n\n").append(memory)
+        }
+        return ChatMessage("system", base + extra)
     }
 
     private fun say(role: ChatRole, text: String) {
@@ -138,10 +153,13 @@ class AgentEngine(
             var planRetried = false
             var iteration = 0
             var stepCounter = 0
+            var lastFailCmd: String? = null
+            var failStreak = 0
 
             while (iteration < maxIterations) {
                 iteration++
                 db.taskDao().byId(taskId)?.let { db.taskDao().update(it.copy(iterations = iteration)) }
+                compactIfNeeded(messages, systemCount = 2)
                 trimWindow(messages, systemCount = 2, keep = WINDOW_KEEP)
 
                 val (fullText0, llmError) = awaitLlm(messages)
@@ -210,6 +228,25 @@ class AgentEngine(
                             "[exit=${result.exitCode ?: "超时"}] ${result.output.take(600)}"
                         )
                         messages += Prompts.observation(stepCounter - 1, cmd, result.exitCode, result.output)
+                        if (result.exitCode != null && result.exitCode != 0) {
+                            failStreak = if (lastFailCmd == cmd) failStreak + 1 else 1
+                            lastFailCmd = cmd
+                        } else {
+                            lastFailCmd = null
+                            failStreak = 0
+                        }
+                        if (failStreak >= 2) {
+                            messages += ChatMessage(
+                                "user",
+                                "同一命令已连续失败 $failStreak 次。禁止原样重试: 先用诊断命令定位根因 (查看完整错误、检查依赖与路径), 再换一种方法或修复环境后继续。"
+                            )
+                        }
+                    }
+                    "todo" -> {
+                        _todos.value = (action.items ?: emptyList()).map { TodoItem(it.text, it.done) }
+                        val doneN = _todos.value.count { it.done }
+                        say(ChatRole.AI, "任务清单更新: ${doneN}/${_todos.value.size} 已完成")
+                        messages += ChatMessage("assistant", fullText)
                     }
                     "done" -> {
                         say(ChatRole.AI, "任务完成: ${action.summary ?: ""}")
@@ -251,8 +288,11 @@ class AgentEngine(
                 chatHistory += ChatMessage("user", message)
 
                 var turns = 0
+                var lastFailCmd: String? = null
+                var failStreak = 0
                 while (turns < CHAT_MAX_TURNS) {
                     turns++
+                    compactIfNeeded(chatHistory, systemCount = 1)
                     trimWindow(chatHistory, systemCount = 1, keep = CHAT_WINDOW_KEEP)
 
                     val (fullText, llmError) = awaitLlm(chatHistory)
@@ -305,7 +345,26 @@ class AgentEngine(
                             )
                             say(ChatRole.OUTPUT, "[exit=${result.exitCode ?: "超时"}] ${result.output.take(600)}")
                             chatHistory += Prompts.observation(turns, cmd, result.exitCode, result.output)
+                            if (result.exitCode != null && result.exitCode != 0) {
+                                failStreak = if (lastFailCmd == cmd) failStreak + 1 else 1
+                                lastFailCmd = cmd
+                            } else {
+                                lastFailCmd = null
+                                failStreak = 0
+                            }
+                            if (failStreak >= 2) {
+                                chatHistory += ChatMessage(
+                                    "user",
+                                    "同一命令已连续失败 $failStreak 次。禁止原样重试: 先诊断根因再换方法。"
+                                )
+                            }
                             _uiState.value = AgentUiState.Idle
+                        }
+                        "todo" -> {
+                            chatHistory += ChatMessage("assistant", fullText)
+                            _todos.value = (actionObj.items ?: emptyList()).map { TodoItem(it.text, it.done) }
+                            val doneN = _todos.value.count { it.done }
+                            say(ChatRole.AI, "任务清单更新: ${doneN}/${_todos.value.size} 已完成")
                         }
                         "done" -> {
                             chatHistory += ChatMessage("assistant", fullText)
@@ -421,6 +480,7 @@ class AgentEngine(
         const val LLM_TIMEOUT_MS = 90_000L
         private const val WINDOW_KEEP = 12
         private const val CHAT_WINDOW_KEEP = 14
+        private const val COMPACT_THRESHOLD = 22
     }
 
     private fun trimWindow(messages: MutableList<ChatMessage>, systemCount: Int, keep: Int) {
@@ -429,6 +489,32 @@ class AgentEngine(
         val tail = messages.takeLast(keep)
         messages.clear()
         messages.addAll(head + tail)
+    }
+
+    private suspend fun compactIfNeeded(messages: MutableList<ChatMessage>, systemCount: Int) {
+        if (messages.size < COMPACT_THRESHOLD) return
+        val keepTail = CHAT_WINDOW_KEEP / 2
+        val middleEnd = messages.size - keepTail
+        if (middleEnd - systemCount < 4) return
+        val middle = messages.subList(systemCount, middleEnd).toList()
+        say(ChatRole.SYSTEM, "对话较长, 正在压缩历史上下文...")
+        val req = listOf(
+            ChatMessage(
+                "system",
+                "你是对话压缩器。把给出的多轮历史压缩为要点摘要: 保留关键事实、文件路径、命令执行结果、已做决定与未完成事项。400 字以内, 直接输出摘要正文。"
+            ),
+            ChatMessage("user", middle.joinToString("\n\n") { m -> "[${m.role}] ${m.content.take(500)}" }.take(12000))
+        )
+        val (summary, err) = awaitLlm(req)
+        if (!err.isNullOrEmpty() || summary.isBlank()) return
+        val rebuilt = mutableListOf<ChatMessage>()
+        rebuilt += messages.take(systemCount)
+        rebuilt += ChatMessage("user", "[早前对话摘要]\n${summary.trim()}")
+        rebuilt += ChatMessage("assistant", "已了解此前进展, 继续当前任务。")
+        rebuilt += messages.takeLast(keepTail)
+        messages.clear()
+        messages.addAll(rebuilt)
+        say(ChatRole.SYSTEM, "历史已压缩 (${middle.size} 条消息 → 摘要)")
     }
 
     private suspend fun awaitLlm(messages: List<ChatMessage>): Pair<String, String?> {

@@ -41,6 +41,12 @@ class AutopilotViewModel(app: Application) : AndroidViewModel(app) {
         engine.skillsProvider = {
             dev.autopilot.terminal.agent.SkillsRegistry.describe(installer.homeDir)
         }
+        engine.memoryProvider = {
+            runCatching {
+                java.io.File(appCtx.workspaceRoot, "AUTOPILOT.md")
+                    .takeIf { it.isFile }?.readText()?.trim()?.take(3000)
+            }.getOrNull()?.let { "项目记忆 (AUTOPILOT.md):\n$it" } ?: ""
+        }
         channel.bindWorkspace { appCtx.workspaceRoot.absolutePath }
         appCtx.appScope.launch {
             engine.busy.collect { busy ->

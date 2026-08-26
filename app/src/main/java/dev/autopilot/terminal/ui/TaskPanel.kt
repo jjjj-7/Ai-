@@ -46,6 +46,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -81,6 +82,7 @@ fun ChatPanel(vm: AutopilotViewModel, modifier: Modifier = Modifier) {
     val state by vm.engine.uiState.collectAsStateSafe()
     val chat by vm.engine.chat.collectAsStateSafe()
     val busy by vm.engine.busy.collectAsStateSafe()
+    val todos by vm.engine.todos.collectAsStateSafe()
     val listState = rememberLazyListState()
 
     LaunchedEffect(chat.size) {
@@ -103,6 +105,10 @@ fun ChatPanel(vm: AutopilotViewModel, modifier: Modifier = Modifier) {
             WindowTitleBar(busy, onStop = { vm.engine.stop() })
 
             FlowingGradientLine(Modifier.fillMaxWidth().height(2.dp))
+
+            if (todos.isNotEmpty()) {
+                TodoPanel(todos)
+            }
 
             LazyColumn(
                 state = listState,
@@ -307,6 +313,59 @@ private fun SurfaceCard(accent: Color = WinBorder, content: @Composable () -> Un
             .border(1.dp, accent.copy(alpha = 0.55f), shape)
             .padding(horizontal = 12.dp, vertical = 8.dp)
     ) { content() }
+}
+
+@Composable
+private fun TodoPanel(todos: List<dev.autopilot.terminal.agent.AgentEngine.TodoItem>) {
+    val doneN = todos.count { it.done }
+    val shape = RoundedCornerShape(10.dp)
+    Column(
+        Modifier
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .fillMaxWidth()
+            .clip(shape)
+            .background(WinSurface.copy(alpha = 0.92f))
+            .border(1.dp, AccentPurple.copy(alpha = 0.35f), shape)
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("进度", color = AccentPurple, fontSize = 10.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.width(8.dp))
+            Text("$doneN/${todos.size}", color = TextDim, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+            Spacer(Modifier.width(10.dp))
+            Box(Modifier.weight(1f).height(3.dp).clip(RoundedCornerShape(2.dp)).background(WinBorder)) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(doneN.toFloat() / todos.size.coerceAtLeast(1))
+                        .height(3.dp)
+                        .background(Brush.horizontalGradient(listOf(AccentGreen, Cyan)))
+                )
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Column {
+            todos.take(6).forEach { item ->
+                Row(Modifier.padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (item.done) {
+                        Text("✓", color = AccentGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    } else {
+                        Box(Modifier.size(8.dp).clip(CircleShape).border(1.5.dp, AccentPurple, CircleShape))
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        item.text,
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = if (item.done) Color(0xFF5F6B7F) else TextMain,
+                        textDecoration = if (item.done) TextDecoration.LineThrough else null
+                    )
+                }
+            }
+            if (todos.size > 6) {
+                Text("... 共 ${todos.size} 项", fontSize = 10.sp, color = TextDim, fontFamily = FontFamily.Monospace)
+            }
+        }
+    }
 }
 
 @Composable
