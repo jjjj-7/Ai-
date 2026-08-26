@@ -79,16 +79,17 @@ fun ChatPanel(vm: AutopilotViewModel, modifier: Modifier = Modifier) {
     val chat by vm.engine.chat.collectAsStateSafe()
     val busy by vm.engine.busy.collectAsStateSafe()
     val todos by vm.engine.todos.collectAsStateSafe()
+    val streamingText by vm.engine.streamingText.collectAsStateSafe()
     val listState = rememberLazyListState()
 
-    LaunchedEffect(chat.size) {
+    LaunchedEffect(chat.size, streamingText.length) {
         if (chat.isNotEmpty()) listState.animateScrollToItem(chat.size - 1)
     }
 
     Box(modifier.background(WinBg)) {
         NebulaBackdrop()
         Column(Modifier.fillMaxSize()) {
-            WindowTitleBar(busy, onStop = { vm.engine.stop() })
+            WindowTitleBar(busy, state, onStop = { vm.engine.stop() })
 
             FlowingGradientLine(Modifier.fillMaxWidth().height(2.dp))
 
@@ -102,11 +103,16 @@ fun ChatPanel(vm: AutopilotViewModel, modifier: Modifier = Modifier) {
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                if (chat.isEmpty()) item { WelcomeBlock() }
+                if (chat.isEmpty() && streamingText.isEmpty()) item { WelcomeBlock() }
                 itemsIndexed(chat) { idx, entry ->
                     val isLast = idx == chat.lastIndex
                     SlideFadeIn {
                         TerminalMessage(entry, animate = isLast && entry.role == ChatRole.AI && !busy)
+                    }
+                }
+                if (streamingText.isNotBlank() && busy) {
+                    item {
+                        StreamingMessage(streamingText)
                     }
                 }
             }
@@ -123,7 +129,7 @@ fun ChatPanel(vm: AutopilotViewModel, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun WindowTitleBar(busy: Boolean, onStop: () -> Unit) {
+private fun WindowTitleBar(busy: Boolean, state: AgentUiState, onStop: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().background(WinSurface).padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -142,13 +148,23 @@ private fun WindowTitleBar(busy: Boolean, onStop: () -> Unit) {
             modifier = Modifier.weight(1f)
         )
         if (busy) {
+            val statusText = when (state) {
+                is AgentUiState.Streaming -> "思考中"
+                is AgentUiState.Executing -> {
+                    val toolName = state.toolName.ifBlank { "执行" }
+                    "$toolName #${state.stepIndex + 1}"
+                }
+                is AgentUiState.Planning -> "规划中"
+                is AgentUiState.AwaitConfirm -> "等待确认"
+                else -> "工作中"
+            }
             LinearProgressIndicator(
                 Modifier.width(56.dp).height(3.dp),
                 color = AccentGreen,
                 trackColor = WinBorder
             )
             Spacer(Modifier.width(8.dp))
-            Text("工作中", color = AccentGreen, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+            Text(statusText, color = AccentGreen, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
             Spacer(Modifier.width(8.dp))
             Text(
                 "停止",
@@ -196,16 +212,17 @@ private fun WelcomeBlock() {
         }
         Spacer(Modifier.height(6.dp))
         Text(
-            "AI 已接管此终端。下方输入指令即可。",
+            "AI 已接管此终端。原生工具调用, 并行执行, 流式输出。",
             fontFamily = FontFamily.Monospace,
             fontSize = 11.sp,
             color = TextDim
         )
         Spacer(Modifier.height(12.dp))
         listOf(
-            Triple("●", AccentGreen, "说一句话，AI 直接回答"),
-            Triple("◆", AccentPurple, "说需求，AI 自动执行命令完成"),
-            Triple("▲", Cyan, "全程可见过程，随时停止")
+            Triple("●", AccentGreen, "原生工具调用 — read/write/edit/grep/glob 零延迟"),
+            Triple("◆", AccentPurple, "并行执行 — batch 多命令同时跑, 倍速完成"),
+            Triple("▲", Cyan, "实时流式输出 — 看 AI 边想边做, 不再盲等"),
+            Triple("■", Color(0xFFE8C76B), "智能错误诊断 — 自动分析根因, 不盲目重试")
         ).forEach { (mark, markColor, line) ->
             Row(Modifier.padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(mark, color = markColor, fontSize = 9.sp)
@@ -250,10 +267,11 @@ private fun TerminalMessage(entry: ChatEntry, animate: Boolean) {
                 else Text(entry.text.take(2000), color = TextMain, fontSize = 13.sp, lineHeight = 19.sp)
             }
         }
-        ChatRole.CMD -> SurfaceCard(accent = Cyan.copy(alpha = 0.35f)) {
+        ChatRole.CMD -> SurfaceCard(accent = toolAccent(entry.toolName)) {
+            val icon = toolIcon(entry.toolName)
             Text(
-                "\$ ${entry.text.substringBefore("\n#")}",
-                color = Cyan, fontSize = 12.sp,
+                "$icon ${entry.text.substringBefore("\n#")}",
+                color = toolColor(entry.toolName), fontSize = 12.sp,
                 fontFamily = FontFamily.Monospace
             )
             entry.text.substringAfter("\n#", "").takeIf { it.isNotBlank() }?.let {
@@ -281,6 +299,76 @@ private fun TerminalMessage(entry: ChatEntry, animate: Boolean) {
             Text(
                 entry.text.take(500),
                 color = AccentAmber.copy(alpha = 0.90f), fontSize = 12.sp, lineHeight = 17.sp
+            )
+        }
+        ChatRole.THINKING, ChatRole.TOOL_CALL -> Unit
+    }
+}
+
+private fun toolIcon(toolName: String?): String = when (toolName) {
+    "execute" -> "$"
+    "batch" -> "II"
+    "read_file" -> "cat"
+    "write_file" -> ">"
+    "edit_file" -> "~"
+    "glob" -> "*"
+    "grep" -> "?"
+    "runbg" -> "bg"
+    "joblog" -> "log"
+    "wait" -> "..."
+    "todo" -> "[ ]"
+    else -> ">"
+}
+
+private fun toolColor(toolName: String?): Color = when (toolName) {
+    "execute", "batch" -> Cyan
+    "read_file" -> Color(0xFF7EC8E3)
+    "write_file", "edit_file" -> AccentGreen
+    "glob", "grep" -> AccentPurple
+    "runbg", "joblog" -> Color(0xFFE8C76B)
+    else -> Cyan
+}
+
+private fun toolAccent(toolName: String?): Color = when (toolName) {
+    "execute", "batch" -> Cyan.copy(alpha = 0.35f)
+    "read_file" -> Color(0xFF7EC8E3).copy(alpha = 0.30f)
+    "write_file", "edit_file" -> AccentGreen.copy(alpha = 0.35f)
+    "glob", "grep" -> AccentPurple.copy(alpha = 0.35f)
+    "runbg", "joblog" -> Color(0xFFE8C76B).copy(alpha = 0.30f)
+    else -> WinBorder
+}
+
+@Composable
+private fun StreamingMessage(text: String) {
+    val cursorAlpha by rememberInfiniteTransition().animateFloat(
+        initialValue = 1f, targetValue = 0.15f,
+        animationSpec = infiniteRepeatable(tween(520), RepeatMode.Reverse)
+    )
+    Row(Modifier.height(IntrinsicSize.Min)) {
+        Box(
+            Modifier
+                .width(2.5.dp)
+                .fillMaxHeight()
+                .clip(RoundedCornerShape(2.dp))
+                .background(Brush.verticalGradient(listOf(AccentGreen, Cyan)))
+        )
+        Spacer(Modifier.width(10.dp))
+        Column {
+            Text(
+                "thinking",
+                color = TextDim,
+                fontSize = 9.sp,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.padding(bottom = 2.dp)
+            )
+            Text(
+                buildAnnotatedString {
+                    append(text.take(3000))
+                    withStyle(SpanStyle(color = Cyan.copy(alpha = cursorAlpha))) { append("▌") }
+                },
+                color = TextMain,
+                fontSize = 13.sp,
+                lineHeight = 19.sp
             )
         }
     }

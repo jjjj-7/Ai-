@@ -34,7 +34,8 @@ class AutopilotViewModel(app: Application) : AndroidViewModel(app) {
         channelProvider = { channel.takeIf { installer.isReady() } },
         channelDescProvider = {
             if (installer.isReady()) "Termux 用户态 / 完整工具链" else "环境安装中"
-        }
+        },
+        workspaceRootProvider = { appCtx.workspaceRoot }
     )
 
     init {

@@ -8,17 +8,23 @@ import dev.autopilot.terminal.data.AppDatabase
 import dev.autopilot.terminal.llm.ChatMessage
 import dev.autopilot.terminal.llm.LlmEvent
 import dev.autopilot.terminal.llm.LlmClient
+import dev.autopilot.terminal.llm.ToolCall
+import dev.autopilot.terminal.llm.ToolDefinition
 import dev.autopilot.terminal.perms.CommandChannel
-import dev.autopilot.terminal.perms.CommandRunner
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import java.io.File
 
 sealed class AgentUiState {
     data object Idle : AgentUiState()
@@ -28,46 +34,36 @@ sealed class AgentUiState {
         val stepIndex: Int,
         val totalSteps: Int,
         val command: String,
-        val iteration: Int
+        val iteration: Int,
+        val toolName: String = ""
     ) : AgentUiState()
     data class AwaitConfirm(val taskId: Long, val command: String, val reason: String) : AgentUiState()
+    data class Streaming(val taskId: Long, val iteration: Int) : AgentUiState()
     data object PausedLimit : AgentUiState()
     data class Done(val summary: String, val changedFiles: List<String>, val elapsedMs: Long, val degraded: Boolean) : AgentUiState()
     data class Stopped(val message: String) : AgentUiState()
     data class Failed(val reason: String) : AgentUiState()
 }
 
-enum class ChatRole { USER, AI, CMD, OUTPUT, SYSTEM }
+enum class ChatRole { USER, AI, CMD, OUTPUT, SYSTEM, THINKING, TOOL_CALL }
 
 data class ChatEntry(
     val role: ChatRole,
     val text: String,
-    val ts: Long = System.currentTimeMillis()
+    val ts: Long = System.currentTimeMillis(),
+    val toolName: String? = null
 )
 
 @Serializable
 internal data class ActionTodoItem(val text: String, val done: Boolean = false)
-
-@Serializable
-internal data class AgentAction(
-    val action: String,
-    val command: String? = null,
-    val commands: List<String>? = null,
-    val description: String? = null,
-    val reason: String? = null,
-    val seconds: Long? = null,
-    val steps: List<PlanStep>? = null,
-    val summary: String? = null,
-    val changed_files: List<String>? = null,
-    val items: List<ActionTodoItem>? = null
-)
 
 class AgentEngine(
     private val scope: CoroutineScope,
     private val llm: LlmClient,
     private val db: AppDatabase,
     private val channelProvider: () -> CommandChannel?,
-    private val channelDescProvider: () -> String
+    private val channelDescProvider: () -> String,
+    private val workspaceRootProvider: () -> File = { File(System.getProperty("user.dir") ?: ".") }
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val planParser = PlanParser()
@@ -81,6 +77,9 @@ class AgentEngine(
     private val _busy = MutableStateFlow(false)
     val busy: StateFlow<Boolean> = _busy
 
+    private val _streamingText = MutableStateFlow("")
+    val streamingText: StateFlow<String> = _streamingText
+
     data class TodoItem(val text: String, val done: Boolean)
     private val _todos = MutableStateFlow<List<TodoItem>>(emptyList())
     val todos: StateFlow<List<TodoItem>> = _todos
@@ -89,6 +88,7 @@ class AgentEngine(
 
     @Volatile private var pendingConfirmCommand: String? = null
     private var loopJob: Job? = null
+    private val toolSchemas: List<ToolDefinition> = AgentTools.schemas()
 
     private fun systemMessage(base: String): ChatMessage {
         val extra = buildString {
@@ -98,8 +98,8 @@ class AgentEngine(
         return ChatMessage("system", base + extra)
     }
 
-    private fun say(role: ChatRole, text: String) {
-        _chat.value = (_chat.value + ChatEntry(role, text)).takeLast(300)
+    private fun say(role: ChatRole, text: String, toolName: String? = null) {
+        _chat.value = (_chat.value + ChatEntry(role, text, System.currentTimeMillis(), toolName)).takeLast(500)
     }
 
     fun submit(goal: String, criteria: List<String>, maxIterations: Int) {
@@ -128,6 +128,7 @@ class AgentEngine(
                 _uiState.value = AgentUiState.Failed(t.message ?: "未知错误")
             } finally {
                 _busy.value = false
+                _streamingText.value = ""
             }
         }
     }
@@ -141,150 +142,265 @@ class AgentEngine(
         startedAt: Long
     ) {
         _uiState.value = AgentUiState.Planning(taskId)
-        say(ChatRole.SYSTEM, "正在制定执行计划...")
 
-            val messages = mutableListOf(
-                systemMessage(Prompts.SYSTEM),
-                ChatMessage("user", Prompts.userTask(goal, criteria, channelDescProvider()))
+        val messages = mutableListOf(
+            systemMessage(Prompts.SYSTEM),
+            ChatMessage("user", Prompts.userTask(goal, criteria, channelDescProvider()))
+        )
+
+        var iteration = 0
+        var stepCounter = 0
+        var lastFailTool: String? = null
+        var failStreak = 0
+
+        while (iteration < maxIterations) {
+            iteration++
+            db.taskDao().byId(taskId)?.let { db.taskDao().update(it.copy(iterations = iteration)) }
+            compactIfNeeded(messages, systemCount = 2)
+            trimWindow(messages, systemCount = 2, keep = WINDOW_KEEP)
+
+            _uiState.value = AgentUiState.Streaming(taskId, iteration)
+            val (fullText, toolCalls, llmError) = awaitLlm(messages)
+            _streamingText.value = ""
+
+            if (llmError != null) {
+                failTask(taskId, "模型调用失败: $llmError")
+                return
+            }
+
+            messages += ChatMessage(
+                role = "assistant",
+                content = fullText,
+                toolCalls = toolCalls
             )
 
-            var plan: Plan? = null
-            var formatRetried = false
-            var iteration = 0
-            var stepCounter = 0
-            var lastFailCmd: String? = null
-            var failStreak = 0
+            if (fullText.isNotBlank() && fullText.length > 10) {
+                say(ChatRole.AI, fullText.trim().take(3000))
+            }
 
-            while (iteration < maxIterations) {
-                iteration++
-                db.taskDao().byId(taskId)?.let { db.taskDao().update(it.copy(iterations = iteration)) }
-                compactIfNeeded(messages, systemCount = 2)
-                trimWindow(messages, systemCount = 2, keep = WINDOW_KEEP)
-
-                val (fullText0, llmError) = awaitLlm(messages)
-                if (llmError != null) {
-                    failTask(taskId, "模型调用失败: $llmError")
-                    return
-                }
-                val fullText = fullText0
-
-                val actionObj = parseAction(fullText)
-                if (actionObj == null) {
-                    if (!formatRetried) {
-                        formatRetried = true
-                        messages += ChatMessage("assistant", fullText)
-                        messages += ChatMessage(
-                            "user",
-                            "你的上一条输出无法解析为动作。请只输出一个合法的 JSON 动作对象 (execute/batch/repair/todo/done), 不要附加任何说明文字或多余 JSON, 继续当前任务。"
-                        )
-                        continue
-                    }
-                    failTask(taskId, "模型响应无法解析: ${fullText.take(200)}")
-                    return
-                }
-                formatRetried = false
-
-                val action = actionObj!!
-                when (action.action) {
-                    "plan" -> {
-                        val p = Plan(action.steps ?: emptyList())
-                        if (p.steps.isEmpty()) { failTask(taskId, "计划为空"); return }
-                        plan = p
-                        _uiState.value = AgentUiState.Executing(taskId, 0, p.steps.size, "", iteration)
-                        say(ChatRole.AI, "已制定 ${p.steps.size} 步执行计划:")
-                        p.steps.take(8).forEachIndexed { i, s ->
-                            say(ChatRole.AI, "${i + 1}. ${s.description.ifBlank { s.command }}")
-                        }
-                        if (p.steps.size > 8) say(ChatRole.AI, "... 共 ${p.steps.size} 步")
-                        messages += ChatMessage("assistant", fullText)
-                    }
-                    "execute", "repair" -> {
-                        val cmd = action.command ?: run { failTask(taskId, "动作缺少 command 字段"); return }
-                        messages += ChatMessage("assistant", fullText)
-                        say(
-                            if (action.action == "repair") ChatRole.AI else ChatRole.CMD,
-                            if (action.action == "repair")
-                                "修复: $cmd\n原因: ${action.reason ?: ""}"
-                            else "\$ $cmd"
-                        )
-
-                        val verdict = RiskFilter.evaluate(cmd)
-                        if (verdict is RiskFilter.Verdict.Confirm) {
-                            pendingConfirmCommand = cmd
-                            db.auditDao().insert(AuditEntryEntity(taskId = taskId, channelLevel = channel.level, command = cmd, exitCode = null))
-                            _uiState.value = AgentUiState.AwaitConfirm(taskId, cmd, verdict.reason)
-                            awaitConfirmDecision()
-                            if (_uiState.value is AgentUiState.Stopped || _uiState.value is AgentUiState.Failed) return
-                            pendingConfirmCommand = null
-                        }
-
-                        stepCounter++
-                        _uiState.value = AgentUiState.Executing(
-                            taskId, stepCounter - 1, plan?.steps?.size ?: stepCounter, cmd, iteration
-                        )
-                        val result = channel.exec(cmd, COMMAND_TIMEOUT_MS)
-                        db.auditDao().insert(
-                            AuditEntryEntity(taskId = taskId, channelLevel = channel.level, command = cmd, exitCode = result.exitCode)
-                        )
-                        say(
-                            ChatRole.OUTPUT,
-                            "[exit=${result.exitCode ?: "超时"}] ${result.output.take(600)}"
-                        )
-                        messages += Prompts.observation(stepCounter - 1, cmd, result.exitCode, result.output)
-                        if (result.exitCode != null && result.exitCode != 0) {
-                            failStreak = if (lastFailCmd == cmd) failStreak + 1 else 1
-                            lastFailCmd = cmd
-                        } else {
-                            lastFailCmd = null
-                            failStreak = 0
-                        }
-                        if (failStreak >= 2) {
-                            messages += ChatMessage(
-                                "user",
-                                "同一命令已连续失败 $failStreak 次。禁止原样重试: 先用诊断命令定位根因 (查看完整错误、检查依赖与路径), 再换一种方法或修复环境后继续。"
-                            )
-                        }
-                    }
-                    "todo" -> {
-                        _todos.value = (action.items ?: emptyList()).map { TodoItem(it.text, it.done) }
-                        val doneN = _todos.value.count { it.done }
-                        say(ChatRole.AI, "任务清单更新: ${doneN}/${_todos.value.size} 已完成")
-                        messages += ChatMessage("assistant", fullText)
-                    }
-                    "done" -> {
-                        say(ChatRole.AI, "任务完成: ${action.summary ?: ""}")
-                        finishTask(taskId, action.summary ?: "任务完成", action.changed_files ?: emptyList(), startedAt, channel.level)
-                        return
-                    }
-                    "abort" -> {
-                        say(ChatRole.AI, "主动中止: ${action.reason ?: "未说明"}")
-                        stopTask(taskId, "AI 主动中止: ${action.reason ?: "未说明"}")
-                        return
-                    }
-                    "wait" -> {
-                        val sec = (action.seconds ?: 5L).coerceIn(1L, 60L)
-                        say(ChatRole.SYSTEM, "等待 ${sec}s...")
-                        delay(sec * 1000)
-                        messages += ChatMessage("assistant", fullText)
-                        messages += ChatMessage("user", "已等待 ${sec}秒。请查看后台任务状态 (joblog) 或继续下一步动作。")
-                    }
-                    else -> {
-                        if (!formatRetried) {
-                            formatRetried = true
-                            messages += ChatMessage("assistant", fullText)
-                            messages += ChatMessage(
-                                "user",
-                                "动作 \"${action.action}\" 暂不支持。标准动作: plan/execute/batch/repair/todo/wait/done/abort。想执行 shell 就用 execute 或 batch, 然后继续任务。"
-                            )
-                        } else {
-                            formatRetried = false
-                            messages += ChatMessage("user", "请用标准动作 (execute/batch/done) 继续, 不要自创动作名。")
-                        }
-                    }
+            if (toolCalls.isEmpty()) {
+                if (fullText.isNotBlank()) {
+                    messages += ChatMessage(
+                        "user",
+                        "你已回复但没有调用任何工具。如果任务已完成，请调用 finish 工具。如果需要执行操作，请使用 execute/batch/read_file 等工具。如果需要更多信息，请说明。"
+                    )
+                    continue
+                } else {
+                    messages += ChatMessage("user", "请使用工具继续执行任务。")
+                    continue
                 }
             }
-            db.taskDao().byId(taskId)?.let { t -> db.taskDao().update(t.copy(status = TaskStatus.PAUSED_LIMIT)) }
-            _uiState.value = AgentUiState.PausedLimit
+
+            val shouldStop = processToolCalls(
+                toolCalls, messages, taskId, channel, stepCounter, iteration, startedAt,
+                { stepCounter = it }, { lastFailTool = it }, { failStreak = it }
+            )
+
+            if (shouldStop == StopReason.FINISH) {
+                val summary = extractFromArgs(toolCalls, AgentTools.FINISH, "summary") ?: "任务完成"
+                val changedFiles = extractListFromArgs(toolCalls, AgentTools.FINISH, "changed_files")
+                say(ChatRole.AI, "任务完成: $summary")
+                finishTask(taskId, summary, changedFiles, startedAt, channel.level)
+                return
+            }
+            if (shouldStop == StopReason.ABORT) {
+                val reason = extractFromArgs(toolCalls, AgentTools.ABORT, "reason") ?: "未说明"
+                say(ChatRole.AI, "主动中止: $reason")
+                stopTask(taskId, "AI 主动中止: $reason")
+                return
+            }
+
+            if (failStreak >= 2) {
+                messages += ChatMessage(
+                    "user",
+                    "同一工具已连续失败 $failStreak 次。禁止原样重试: 先用诊断命令定位根因 (查看完整错误、检查依赖与路径), 再换一种方法或修复环境后继续。如果确实无法继续，调用 abort 说明原因。"
+                )
+            }
+        }
+        db.taskDao().byId(taskId)?.let { t -> db.taskDao().update(t.copy(status = TaskStatus.PAUSED_LIMIT)) }
+        _uiState.value = AgentUiState.PausedLimit
+    }
+
+    private enum class StopReason { CONTINUE, FINISH, ABORT }
+
+    private suspend fun processToolCalls(
+        toolCalls: List<ToolCall>,
+        messages: MutableList<ChatMessage>,
+        taskId: Long,
+        channel: CommandChannel,
+        stepCounterInit: Int,
+        iteration: Int,
+        startedAt: Long,
+        setStepCounter: (Int) -> Unit,
+        setLastFailTool: (String?) -> Unit,
+        setFailStreak: (Int) -> Unit
+    ): StopReason {
+        var stepCounter = stepCounterInit
+        var lastFailTool: String? = null
+        var failStreak = 0
+        var anyError = false
+
+        val todoCalls = toolCalls.filter { it.function == AgentTools.TODO }
+        if (todoCalls.isNotEmpty()) {
+            val firstTodo = todoCalls.first()
+            val items = runCatching {
+                json.parseToJsonElement(firstTodo.arguments)
+                    .let { it as? kotlinx.serialization.json.JsonObject }
+                    ?.get("items")
+            }.getOrNull()
+            if (items != null) {
+                val todoItems = (items as kotlinx.serialization.json.JsonArray).mapNotNull { itemEl ->
+                    val item = itemEl as? kotlinx.serialization.json.JsonObject ?: return@mapNotNull null
+                    val text = item["text"]?.let { (it as kotlinx.serialization.json.JsonPrimitive).content } ?: ""
+                    val done = item["done"]?.let { (it as kotlinx.serialization.json.JsonPrimitive).content == "true" } ?: false
+                    ActionTodoItem(text, done)
+                }
+                _todos.value = todoItems.map { TodoItem(it.text, it.done) }
+                val doneN = _todos.value.count { it.done }
+                say(ChatRole.AI, "任务清单: ${doneN}/${_todos.value.size} 已完成")
+            }
+            messages += ChatMessage("tool", "Todo updated.", toolCallId = firstTodo.id, name = AgentTools.TODO)
+        }
+
+        val actionCalls = toolCalls.filter { it.function !in listOf(AgentTools.TODO, AgentTools.FINISH, AgentTools.ABORT) }
+        if (actionCalls.size > 1) {
+            say(ChatRole.SYSTEM, "并行执行 ${actionCalls.size} 个工具...")
+        }
+
+        val results: List<Pair<ToolCall, AgentTools.ToolResult>> = coroutineScope {
+            actionCalls.map { tc ->
+                async {
+                    val result = AgentTools.execute(
+                        tc.function, tc.arguments, channel,
+                        workspaceRootProvider(), COMMAND_TIMEOUT_MS
+                    )
+                    Pair<ToolCall, AgentTools.ToolResult>(tc, result)
+                }
+            }.awaitAll()
+        }
+
+        for ((tc, result) in results) {
+            stepCounter++
+            setStepCounter(stepCounter)
+
+            val displayCmd = formatToolDisplay(tc.function, tc.arguments)
+            say(ChatRole.CMD, displayCmd, toolName = tc.function)
+
+            if (tc.function == AgentTools.EXECUTE || tc.function == AgentTools.BATCH) {
+                val cmd = extractFromArgsSingle(tc.arguments, "command")
+                    ?: extractFromArgsSingle(tc.arguments, "commands")
+                    ?: tc.function
+                val verdict = RiskFilter.evaluate(cmd)
+                if (verdict is RiskFilter.Verdict.Confirm) {
+                    pendingConfirmCommand = cmd
+                    db.auditDao().insert(AuditEntryEntity(taskId = taskId, channelLevel = channel.level, command = cmd, exitCode = null))
+                    _uiState.value = AgentUiState.AwaitConfirm(taskId, cmd, verdict.reason)
+                    awaitConfirmDecision()
+                    if (_uiState.value is AgentUiState.Stopped || _uiState.value is AgentUiState.Failed) return StopReason.ABORT
+                    pendingConfirmCommand = null
+                }
+            }
+
+            _uiState.value = AgentUiState.Executing(
+                taskId, stepCounter - 1, _todos.value.size.coerceAtLeast(stepCounter),
+                displayCmd.take(100), iteration, tc.function
+            )
+
+            if (tc.function == AgentTools.EXECUTE || tc.function == AgentTools.BATCH || tc.function == AgentTools.RUNBG || tc.function == AgentTools.JOBLOG) {
+                val cmd = extractFromArgsSingle(tc.arguments, "command")
+                    ?: extractFromArgsSingle(tc.arguments, "name")
+                    ?: tc.function
+                db.auditDao().insert(
+                    AuditEntryEntity(taskId = taskId, channelLevel = channel.level, command = cmd, exitCode = result.exitCode)
+                )
+            }
+
+            val outputDisplay = if (result.output.length > 1500) {
+                result.output.take(700) + "\n\n[... 输出过长, 完整内容已发送给模型 ...]\n\n" + result.output.takeLast(300)
+            } else {
+                result.output
+            }
+            say(ChatRole.OUTPUT, outputDisplay, toolName = tc.function)
+
+            val obs = Prompts.observation(tc.function, tc.arguments, result.output, result.isError, result.exitCode)
+            messages += ChatMessage(
+                role = "tool",
+                content = obs.content,
+                toolCallId = tc.id,
+                name = tc.function
+            )
+
+            if (result.isError) {
+                anyError = true
+                failStreak = if (lastFailTool == tc.function) failStreak + 1 else 1
+                lastFailTool = tc.function
+            } else {
+                lastFailTool = null
+                failStreak = 0
+            }
+            setLastFailTool(lastFailTool)
+            setFailStreak(failStreak)
+
+            if (result.output == "__FINISH__") return StopReason.FINISH
+            if (result.output == "__ABORT__") return StopReason.ABORT
+        }
+
+        val finishCall = toolCalls.firstOrNull { it.function == AgentTools.FINISH }
+        if (finishCall != null) return StopReason.FINISH
+        val abortCall = toolCalls.firstOrNull { it.function == AgentTools.ABORT }
+        if (abortCall != null) return StopReason.ABORT
+
+        return StopReason.CONTINUE
+    }
+
+    private fun formatToolDisplay(function: String, arguments: String): String {
+        return try {
+            val args = json.parseToJsonElement(arguments) as? kotlinx.serialization.json.JsonObject
+            when (function) {
+                AgentTools.EXECUTE -> "\$ ${args?.get("command")?.toString()?.trim('"') ?: ""}"
+                AgentTools.BATCH -> {
+                    val cmds = (args?.get("commands") as? kotlinx.serialization.json.JsonArray)
+                        ?.map { it.toString().trim('"') } ?: emptyList()
+                    cmds.joinToString("\n") { "\$ $it" }
+                }
+                AgentTools.READ_FILE -> "read ${args?.get("path")?.toString()?.trim('"') ?: ""}" +
+                    (args?.get("offset")?.let { " from line ${it.toString().trim('"')}" } ?: "")
+                AgentTools.WRITE_FILE -> "write ${args?.get("path")?.toString()?.trim('"') ?: ""}"
+                AgentTools.EDIT_FILE -> "edit ${args?.get("path")?.toString()?.trim('"') ?: ""}"
+                AgentTools.GLOB -> "glob ${args?.get("pattern")?.toString()?.trim('"') ?: ""}"
+                AgentTools.GREP -> "grep ${args?.get("pattern")?.toString()?.trim('"') ?: ""}"
+                AgentTools.RUNBG -> "bg ${args?.get("name")?.toString()?.trim('"') ?: ""}: ${args?.get("command")?.toString()?.trim('"')?.take(60) ?: ""}"
+                AgentTools.JOBLOG -> "joblog ${args?.get("name")?.toString()?.trim('"') ?: ""}"
+                AgentTools.WAIT -> "wait ${args?.get("seconds")?.toString()?.trim('"') ?: "5"}s"
+                AgentTools.TODO -> "todo update"
+                else -> "$function($arguments)"
+            }
+        } catch (e: Exception) {
+            "$function($arguments)"
+        }
+    }
+
+    private fun extractFromArgs(toolCalls: List<ToolCall>, function: String, field: String): String? {
+        val tc = toolCalls.firstOrNull { it.function == function } ?: return null
+        return extractFromArgsSingle(tc.arguments, field)
+    }
+
+    private fun extractListFromArgs(toolCalls: List<ToolCall>, function: String, field: String): List<String> {
+        val tc = toolCalls.firstOrNull { it.function == function } ?: return emptyList()
+        return try {
+            val args = json.parseToJsonElement(tc.arguments) as? kotlinx.serialization.json.JsonObject ?: return emptyList()
+            val arr = args[field] as? kotlinx.serialization.json.JsonArray ?: return emptyList()
+            arr.map { it.toString().trim('"') }
+        } catch (e: Exception) { emptyList() }
+    }
+
+    private fun extractFromArgsSingle(arguments: String, field: String): String? {
+        return try {
+            val args = json.parseToJsonElement(arguments) as? kotlinx.serialization.json.JsonObject
+            args?.get(field)?.let {
+                (it as? kotlinx.serialization.json.JsonPrimitive)?.content
+            }
+        } catch (e: Exception) { null }
     }
 
     private val chatHistory = mutableListOf<ChatMessage>()
@@ -307,154 +423,120 @@ class AgentEngine(
                 chatHistory += ChatMessage("user", message)
 
                 var turns = 0
-                var lastFailCmd: String? = null
-                var failStreak = 0
                 while (turns < CHAT_MAX_TURNS) {
                     turns++
                     compactIfNeeded(chatHistory, systemCount = 1)
                     trimWindow(chatHistory, systemCount = 1, keep = CHAT_WINDOW_KEEP)
 
-                    val (fullText, llmError) = awaitLlm(chatHistory)
+                    _uiState.value = AgentUiState.Streaming(0L, turns)
+                    val (fullText, toolCalls, llmError) = awaitLlm(chatHistory)
+                    _streamingText.value = ""
+
                     if (llmError != null) {
                         say(ChatRole.SYSTEM, "模型调用失败: $llmError")
                         _uiState.value = AgentUiState.Idle
                         return@launch
                     }
 
-                    val actionObj = parseAction(fullText)
-                    if (actionObj == null) {
-                        val looksLikeBrokenJson =
-                            fullText.contains("\"action\"") || fullText.contains("{\"") || fullText.contains("```json")
-                        if (looksLikeBrokenJson) {
-                            chatHistory += ChatMessage("assistant", fullText)
-                            chatHistory += ChatMessage(
-                                "user",
-                                "你的输出包含不完整的动作 JSON。请只重新输出一个完整合法的 JSON 动作对象, 不附加任何说明文字, 继续执行。"
-                            )
-                            continue
-                        }
-                        chatHistory += ChatMessage("assistant", fullText)
+                    chatHistory += ChatMessage(
+                        role = "assistant",
+                        content = fullText,
+                        toolCalls = toolCalls
+                    )
+
+                    if (fullText.isNotBlank() && fullText.length > 10) {
                         say(ChatRole.AI, fullText.trim().take(2000))
+                    }
+
+                    if (toolCalls.isEmpty()) {
+                        if (fullText.isNotBlank()) {
+                            _uiState.value = AgentUiState.Idle
+                            return@launch
+                        }
+                        chatHistory += ChatMessage("user", "请使用工具执行操作，或调用 finish 结束。")
+                        continue
+                    }
+
+                    val channel = channelProvider()
+                    if (channel == null && toolCalls.any { it.function in listOf(AgentTools.EXECUTE, AgentTools.BATCH, AgentTools.RUNBG, AgentTools.JOBLOG) }) {
+                        say(ChatRole.SYSTEM, "终端环境未就绪，无法执行命令")
                         _uiState.value = AgentUiState.Idle
                         return@launch
                     }
 
-                    when (actionObj.action) {
-                        "execute", "repair" -> {
-                            val cmd = actionObj.command
-                            if (cmd.isNullOrBlank()) {
-                                chatHistory += ChatMessage("assistant", fullText)
-                                say(ChatRole.AI, fullText.trim().take(2000))
-                                _uiState.value = AgentUiState.Idle
-                                return@launch
+                    for (tc in toolCalls) {
+                        if (tc.function == AgentTools.TODO) {
+                            val items = runCatching {
+                                (json.parseToJsonElement(tc.arguments) as? kotlinx.serialization.json.JsonObject)
+                                    ?.get("items")
+                            }.getOrNull()
+                            if (items != null) {
+                                val todoItems = (items as kotlinx.serialization.json.JsonArray).mapNotNull { itemEl ->
+                                    val item = itemEl as? kotlinx.serialization.json.JsonObject ?: return@mapNotNull null
+                                    val text = item["text"]?.let { (it as kotlinx.serialization.json.JsonPrimitive).content } ?: ""
+                                    val done = item["done"]?.let { (it as kotlinx.serialization.json.JsonPrimitive).content == "true" } ?: false
+                                    ActionTodoItem(text, done)
+                                }
+                                _todos.value = todoItems.map { TodoItem(it.text, it.done) }
+                                say(ChatRole.AI, "任务清单: ${_todos.value.count { it.done }}/${_todos.value.size} 已完成")
                             }
-                            chatHistory += ChatMessage("assistant", fullText)
-                            val desc = actionObj.description?.take(80) ?: ""
-                            say(ChatRole.CMD, "$cmd" + if (desc.isNotBlank()) "\n# $desc" else "")
+                            chatHistory += ChatMessage("tool", "Todo updated.", toolCallId = tc.id, name = tc.function)
+                            continue
+                        }
 
-                            val channel = channelProvider()
-                            if (channel == null) {
-                                say(ChatRole.SYSTEM, "终端环境未就绪，无法执行命令")
-                                return@launch
-                            }
+                        if (tc.function == AgentTools.FINISH) {
+                            val summary = extractFromArgsSingle(tc.arguments, "summary") ?: "完成"
+                            say(ChatRole.AI, summary.take(500))
+                            chatHistory += ChatMessage("tool", "Done.", toolCallId = tc.id, name = tc.function)
+                            _uiState.value = AgentUiState.Idle
+                            return@launch
+                        }
+
+                        if (tc.function == AgentTools.ABORT) {
+                            val reason = extractFromArgsSingle(tc.arguments, "reason") ?: "中止"
+                            say(ChatRole.AI, "中止: $reason")
+                            chatHistory += ChatMessage("tool", "Aborted.", toolCallId = tc.id, name = tc.function)
+                            _uiState.value = AgentUiState.Idle
+                            return@launch
+                        }
+
+                        val displayCmd = formatToolDisplay(tc.function, tc.arguments)
+                        say(ChatRole.CMD, displayCmd, toolName = tc.function)
+
+                        if (tc.function == AgentTools.EXECUTE || tc.function == AgentTools.BATCH) {
+                            val cmd = extractFromArgsSingle(tc.arguments, "command")
+                                ?: extractFromArgsSingle(tc.arguments, "commands")
+                                ?: tc.function
                             val verdict = RiskFilter.evaluate(cmd)
                             if (verdict is RiskFilter.Verdict.Confirm) {
                                 pendingConfirmCommand = cmd
-                                db.auditDao().insert(AuditEntryEntity(taskId = 0L, channelLevel = channel.level, command = cmd, exitCode = null))
+                                db.auditDao().insert(AuditEntryEntity(taskId = 0L, channelLevel = channel?.level ?: ChannelLevel.SANDBOX, command = cmd, exitCode = null))
                                 _uiState.value = AgentUiState.AwaitConfirm(0L, cmd, verdict.reason)
                                 awaitConfirmDecision()
                                 pendingConfirmCommand = null
                                 if (_uiState.value is AgentUiState.Stopped || _uiState.value is AgentUiState.Failed) return@launch
                             }
+                        }
 
-                            _uiState.value = AgentUiState.Executing(0L, 0, 1, cmd, 0)
-                            val result = channel.exec(cmd, COMMAND_TIMEOUT_MS)
-                            db.auditDao().insert(
-                                AuditEntryEntity(taskId = 0L, channelLevel = channel.level, command = cmd, exitCode = result.exitCode)
-                            )
-                            say(ChatRole.OUTPUT, "[exit=${result.exitCode ?: "超时"}] ${result.output.take(600)}")
-                            chatHistory += Prompts.observation(turns, cmd, result.exitCode, result.output)
-                            if (result.exitCode != null && result.exitCode != 0) {
-                                failStreak = if (lastFailCmd == cmd) failStreak + 1 else 1
-                                lastFailCmd = cmd
-                            } else {
-                                lastFailCmd = null
-                                failStreak = 0
-                            }
-                            if (failStreak >= 2) {
-                                chatHistory += ChatMessage(
-                                    "user",
-                                    "同一命令已连续失败 $failStreak 次。禁止原样重试: 先诊断根因再换方法。"
-                                )
-                            }
-                            _uiState.value = AgentUiState.Idle
-                        }
-                    "batch" -> {
-                        val cmds = actionObj.commands?.filter { it.isNotBlank() } ?: emptyList()
-                        if (cmds.isEmpty()) {
-                            chatHistory += ChatMessage("assistant", fullText)
-                            say(ChatRole.AI, fullText.trim().take(2000))
-                            _uiState.value = AgentUiState.Idle
-                            return@launch
-                        }
-                        chatHistory += ChatMessage("assistant", fullText)
-                        say(ChatRole.CMD, cmds.joinToString("\n") { "\$ $it" })
-                        val channel = channelProvider()
-                        if (channel == null) {
-                            say(ChatRole.SYSTEM, "终端环境未就绪，无法执行命令")
-                            return@launch
-                        }
-                        var combined = ""
-                        var lastExit: Int? = 0
-                        for ((i, c) in cmds.withIndex()) {
-                            val verdict = RiskFilter.evaluate(c)
-                            if (verdict is RiskFilter.Verdict.Confirm) {
-                                pendingConfirmCommand = c
-                                db.auditDao().insert(AuditEntryEntity(taskId = 0L, channelLevel = channel.level, command = c, exitCode = null))
-                                _uiState.value = AgentUiState.AwaitConfirm(0L, c, verdict.reason)
-                                awaitConfirmDecision()
-                                pendingConfirmCommand = null
-                                if (_uiState.value is AgentUiState.Stopped || _uiState.value is AgentUiState.Failed) return@launch
-                            }
-                            _uiState.value = AgentUiState.Executing(0L, i, cmds.size, c, turns)
-                            val r = channel.exec(c, COMMAND_TIMEOUT_MS)
-                            db.auditDao().insert(AuditEntryEntity(taskId = 0L, channelLevel = channel.level, command = c, exitCode = r.exitCode))
-                            lastExit = r.exitCode
-                            combined += "[${i + 1}/${cmds.size} exit=${r.exitCode ?: "超时"}] \$ ${c.take(80)}\n${r.output.take(400)}\n"
-                            if (r.exitCode != null && r.exitCode != 0) break
-                        }
-                        say(ChatRole.OUTPUT, combined.take(1400))
-                        chatHistory += Prompts.observation(turns, actionObj.description ?: "batch", lastExit, combined.take(3200))
-                        _uiState.value = AgentUiState.Idle
+                        _uiState.value = AgentUiState.Executing(0L, 0, 1, displayCmd.take(100), turns, tc.function)
+                        val result = AgentTools.execute(
+                            tc.function, tc.arguments, channel,
+                            workspaceRootProvider(), COMMAND_TIMEOUT_MS
+                        )
+                        val outputDisplay = if (result.output.length > 1200) {
+                            result.output.take(500) + "\n\n[... truncated ...]\n\n" + result.output.takeLast(300)
+                        } else result.output
+                        say(ChatRole.OUTPUT, outputDisplay, toolName = tc.function)
+
+                        val obs = Prompts.observation(tc.function, tc.arguments, result.output, result.isError, result.exitCode)
+                        chatHistory += ChatMessage(
+                            role = "tool",
+                            content = obs.content,
+                            toolCallId = tc.id,
+                            name = tc.function
+                        )
                     }
-                    "todo" -> {
-                        chatHistory += ChatMessage("assistant", fullText)
-                        _todos.value = (actionObj.items ?: emptyList()).map { TodoItem(it.text, it.done) }
-                        val doneN = _todos.value.count { it.done }
-                        say(ChatRole.AI, "任务清单更新: ${doneN}/${_todos.value.size} 已完成")
-                    }
-                        "wait" -> {
-                            val sec = (actionObj.seconds ?: 5L).coerceIn(1L, 60L)
-                            say(ChatRole.SYSTEM, "等待 ${sec}s...")
-                            delay(sec * 1000)
-                            chatHistory += ChatMessage("assistant", fullText)
-                            chatHistory += ChatMessage("user", "已等待 ${sec}秒。请继续: 查看 joblog 或执行下一步。")
-                        }
-                        "done" -> {
-                            chatHistory += ChatMessage("assistant", fullText)
-                            say(ChatRole.AI, actionObj.summary ?: "完成")
-                            _uiState.value = AgentUiState.Idle
-                            return@launch
-                        }
-                        else -> {
-                            chatHistory += ChatMessage("assistant", fullText)
-                            chatHistory += ChatMessage(
-                                "user",
-                                "动作 \"${actionObj.action}\" 暂不支持。标准动作: execute/batch/todo/wait/done。想执行命令就输出 execute 或 batch JSON, 不要用其他动作名。"
-                            )
-                            continue
-                        }
-                    }
+                    _uiState.value = AgentUiState.Idle
                 }
                 say(ChatRole.SYSTEM, "本轮连续操作步数已达上限，已回到对话状态")
                 _uiState.value = AgentUiState.Idle
@@ -465,6 +547,7 @@ class AgentEngine(
                 _uiState.value = AgentUiState.Idle
             } finally {
                 _busy.value = false
+                _streamingText.value = ""
             }
         }
     }
@@ -507,6 +590,7 @@ class AgentEngine(
         loopJob?.cancel()
         loopJob = null
         pendingConfirmCommand = null
+        _streamingText.value = ""
         _uiState.value = AgentUiState.Idle
     }
 
@@ -541,69 +625,65 @@ class AgentEngine(
         _uiState.value = AgentUiState.Failed(reason)
     }
 
-    private fun parseAction(text: String): AgentAction? {
-        val cleaned = Regex("```(?:json)?").replace(text, "").replace("```", "")
-        var depth = 0
-        var start = -1
-        var inStr = false
-        var esc = false
-        for (i in cleaned.indices) {
-            val ch = cleaned[i]
-            if (inStr) {
-                if (esc) esc = false
-                else if (ch == '\\') esc = true
-                else if (ch == '"') inStr = false
-                continue
-            }
-            when (ch) {
-                '"' -> inStr = true
-                '{' -> { if (depth == 0) start = i; depth++ }
-                '}' -> {
-                    depth--
-                    if (depth == 0 && start >= 0) {
-                        val cand = cleaned.substring(start, i + 1)
-                        val parsed = runCatching { json.decodeFromString<AgentAction>(cand) }.getOrNull()
-                        if (parsed != null && parsed.action.isNotBlank()) return parsed
-                        start = -1
-                    }
-                    if (depth < 0) depth = 0
-                }
-            }
-        }
-        return null
-    }
-
     companion object {
         const val COMMAND_TIMEOUT_MS = 120_000L
         const val CONFIRM_TIMEOUT_MS = 10 * 60_000L
-        const val CHAT_MAX_TURNS = 15
-        const val LLM_TIMEOUT_MS = 120_000L
-        private const val WINDOW_KEEP = 12
-        private const val CHAT_WINDOW_KEEP = 14
-        private const val COMPACT_THRESHOLD = 22
+        const val CHAT_MAX_TURNS = 20
+        const val LLM_TIMEOUT_MS = 180_000L
+        const val MAX_TOKENS = 8192
+        const val WINDOW_KEEP = 40
+        const val CHAT_WINDOW_KEEP = 30
+        const val COMPACT_THRESHOLD = 60
+        const val MAX_CONTEXT_CHARS = 80_000
+    }
+
+    private fun estimateTokens(messages: List<ChatMessage>): Int {
+        var chars = 0
+        for (m in messages) {
+            chars += m.content.length
+            for (tc in m.toolCalls) {
+                chars += tc.function.length + tc.arguments.length
+            }
+        }
+        return chars / 4
     }
 
     private fun trimWindow(messages: MutableList<ChatMessage>, systemCount: Int, keep: Int) {
         if (messages.size <= systemCount + keep) return
+        val estimatedTokens = estimateTokens(messages)
+        if (estimatedTokens <= MAX_CONTEXT_CHARS / 4) return
+
         val head = messages.take(systemCount)
         val tail = messages.takeLast(keep)
         messages.clear()
         messages.addAll(head + tail)
+        say(ChatRole.SYSTEM, "上下文已裁剪 (保留最近 $keep 条)")
     }
 
     private suspend fun compactIfNeeded(messages: MutableList<ChatMessage>, systemCount: Int) {
         if (messages.size < COMPACT_THRESHOLD) return
-        val keepTail = CHAT_WINDOW_KEEP / 2
+        val estimatedTokens = estimateTokens(messages)
+        if (estimatedTokens < MAX_CONTEXT_CHARS / 4 * 0.8) return
+
+        val keepTail = WINDOW_KEEP / 2
         val middleEnd = messages.size - keepTail
         if (middleEnd - systemCount < 4) return
         val middle = messages.subList(systemCount, middleEnd).toList()
+
         say(ChatRole.SYSTEM, "对话较长, 正在压缩历史上下文...")
         val req = listOf(
             ChatMessage(
                 "system",
-                "你是对话压缩器。把给出的多轮历史压缩为要点摘要: 保留关键事实、文件路径、命令执行结果、已做决定与未完成事项。400 字以内, 直接输出摘要正文。"
+                "你是对话压缩器。把给出的多轮历史压缩为要点摘要: 保留关键事实、文件路径、命令执行结果、已做决定与未完成事项。600 字以内, 直接输出摘要正文。"
             ),
-            ChatMessage("user", middle.joinToString("\n\n") { m -> "[${m.role}] ${m.content.take(500)}" }.take(12000))
+            ChatMessage("user", middle.joinToString("\n\n") { m ->
+                val content = m.content.take(800)
+                if (m.toolCalls.isNotEmpty()) {
+                    "[${m.role} tools: ${m.toolCalls.joinToString(", ") { "${it.function}(${it.arguments.take(100)})" }}] $content"
+                } else {
+                    "[${m.role}] $content"
+                }
+            }.take(20000))
         )
         val (summary, err) = awaitLlm(req)
         if (!err.isNullOrEmpty() || summary.isBlank()) return
@@ -617,26 +697,35 @@ class AgentEngine(
         say(ChatRole.SYSTEM, "历史已压缩 (${middle.size} 条消息 → 摘要)")
     }
 
-    private suspend fun awaitLlm(messages: List<ChatMessage>): Pair<String, String?> {
-        var last: Pair<String, String?> = Pair("", "未知错误")
+    private suspend fun awaitLlm(messages: List<ChatMessage>): Triple<String, List<ToolCall>, String?> {
+        var last: Triple<String, List<ToolCall>, String?> = Triple("", emptyList(), "未知错误")
         repeat(2) { attempt ->
             val done = kotlinx.coroutines.withTimeoutOrNull(LLM_TIMEOUT_MS) {
                 var text = ""
+                var toolCalls = emptyList<ToolCall>()
                 var err: String? = null
-                llm.chat(messages).collect { ev ->
+                llm.chat(messages, MAX_TOKENS, toolSchemas).collect { ev ->
                     when (ev) {
-                        is LlmEvent.Completed -> text = ev.fullText
+                        is LlmEvent.Delta -> {
+                            if (ev.text.isNotEmpty()) {
+                                _streamingText.value = _streamingText.value + ev.text
+                            }
+                        }
+                        is LlmEvent.Completed -> {
+                            text = ev.fullText
+                            toolCalls = ev.toolCalls
+                            _streamingText.value = ""
+                        }
                         is LlmEvent.Failed -> err = ev.error
-                        is LlmEvent.Delta -> Unit
                     }
                 }
-                Pair(text, err)
+                Triple(text, toolCalls, err)
             }
-            last = done ?: Pair("", "模型响应超时 (${LLM_TIMEOUT_MS / 1000}s)")
-            if (last.second == null) return last
+            last = done ?: Triple("", emptyList(), "模型响应超时 (${LLM_TIMEOUT_MS / 1000}s)")
+            if (last.third == null) return last
             if (attempt == 0) {
-                say(ChatRole.SYSTEM, "模型响应异常 (${last.second?.take(60)}), 自动重试...")
-                delay(600)
+                say(ChatRole.SYSTEM, "模型响应异常 (${last.third?.take(60)}), 自动重试...")
+                delay(800)
             }
         }
         return last
