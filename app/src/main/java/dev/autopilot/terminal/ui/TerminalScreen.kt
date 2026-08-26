@@ -79,19 +79,39 @@ fun TerminalScreen(vm: AutopilotViewModel) {
         } else {
             vm.registry.pruneDead()
             Box(Modifier.weight(0.34f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 20.dp)) {
+                    val bashExists = remember {
+                        java.io.File(vm.installer.prefix, "bin/bash").let { it.exists() && it.canExecute() }
+                    }
+                    val stateLabel = when (val bs = bootstrapState) {
+                        is BootstrapInstaller.InstallState.Ready -> "环境就绪，终端未运行"
+                        is BootstrapInstaller.InstallState.Installing -> "正在安装环境..."
+                        is BootstrapInstaller.InstallState.Failed -> "安装失败: ${bs.reason}"
+                        else ->
+                            if (bashExists) "检测到已装环境，点下方按钮同步"
+                            else "环境未安装 (状态: Idle) — 点「开始安装」触发"
+                    }
                     Text(
-                        if (bootstrapState is BootstrapInstaller.InstallState.Ready)
-                            "终端未运行"
-                        else "等待环境安装完成",
-                        color = Color(0xFF9CA3AF)
+                        stateLabel,
+                        color = if (bootstrapState is BootstrapInstaller.InstallState.Failed) AccentAmber else Color(0xFF9CA3AF),
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp
                     )
                     Spacer(Modifier.height(8.dp))
-                    Button(
-                        onClick = { vm.registry.createInteractive(AutopilotViewModel.AGENT_SESSION) },
-                        enabled = bootstrapState is BootstrapInstaller.InstallState.Ready
-                    ) {
-                        Text("启动终端")
+                    Row {
+                        if (bootstrapState !is BootstrapInstaller.InstallState.Ready) {
+                            OutlinedButton(
+                                onClick = { vm.retryBootstrap() },
+                                enabled = bootstrapState !is BootstrapInstaller.InstallState.Installing
+                            ) { Text(if (bashExists) "刷新状态" else "开始安装") }
+                            Spacer(Modifier.width(8.dp))
+                        }
+                        Button(
+                            onClick = { vm.registry.createInteractive(AutopilotViewModel.AGENT_SESSION) },
+                            enabled = bootstrapState is BootstrapInstaller.InstallState.Ready
+                        ) {
+                            Text("启动终端")
+                        }
                     }
                 }
             }
