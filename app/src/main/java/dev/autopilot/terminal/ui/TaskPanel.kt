@@ -207,6 +207,10 @@ fun ChatPanel(vm: AutopilotViewModel, modifier: Modifier = Modifier) {
 
 @Composable
 private fun WindowTitleBar(busy: Boolean, state: AgentUiState, onStop: () -> Unit) {
+    val pulsingAlpha by rememberInfiniteTransition().animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1500), RepeatMode.Reverse)
+    )
     Row(
         Modifier.fillMaxWidth().background(WinSurface).padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -254,7 +258,8 @@ private fun WindowTitleBar(busy: Boolean, state: AgentUiState, onStop: () -> Uni
         } else {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
-                    Modifier.size(7.dp).clip(CircleShape).background(AccentGreen),
+                    Modifier.size(7.dp).clip(CircleShape).background(AccentGreen)
+                        .graphicsLayer { alpha = 0.5f + 0.5f * pulsingAlpha },
                     contentAlignment = Alignment.Center
                 ) {}
                 Spacer(Modifier.width(5.dp))
