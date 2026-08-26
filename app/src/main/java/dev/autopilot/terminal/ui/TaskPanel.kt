@@ -738,15 +738,33 @@ private fun SimpleMarkdown(text: String) {
                 line.trimStart().startsWith("- ") || line.trimStart().startsWith("* ") -> {
                     val content = line.trimStart().drop(2)
                     Row(Modifier.padding(vertical = 1.dp)) {
-                        Text("•", color = Cyan, fontSize = 13.sp, modifier = Modifier.width(16.dp))
+                        Text("\u2022", color = Cyan, fontSize = 13.sp, modifier = Modifier.width(16.dp))
                         StyledText(content)
                     }
+                }
+                Regex("^\\d+\\.\\s").containsMatchIn(line.trimStart()) -> {
+                    val match = Regex("^\\d+\\.\\s").find(line.trimStart())!!
+                    val num = match.value.trim().dropLast(1)
+                    val content = line.trimStart().drop(match.value.length)
+                    Row(Modifier.padding(vertical = 1.dp)) {
+                        Text("$num.", color = AccentPurple, fontSize = 13.sp, modifier = Modifier.width(20.dp), fontFamily = FontFamily.Monospace)
+                        StyledText(content)
+                    }
+                }
+                line.trimStart().startsWith("> ") -> {
+                    StyledText(line.trimStart().drop(2), size = 12)
+                }
+                line.trimStart().startsWith("### ") -> {
+                    StyledText(line.trimStart().drop(4), bold = true, size = 12)
                 }
                 line.trimStart().startsWith("# ") -> {
                     StyledText(line.trimStart().drop(2), bold = true, size = 14)
                 }
                 line.trimStart().startsWith("## ") -> {
                     StyledText(line.trimStart().drop(3), bold = true, size = 13)
+                }
+                line.trim() == "---" || line.trim() == "***" -> {
+                    Box(Modifier.fillMaxWidth().height(1.dp).background(WinBorder).padding(vertical = 2.dp))
                 }
                 line.isBlank() -> Spacer(Modifier.height(4.dp))
                 else -> StyledText(line)
