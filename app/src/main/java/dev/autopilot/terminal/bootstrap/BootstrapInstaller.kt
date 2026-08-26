@@ -57,6 +57,7 @@ class BootstrapInstaller private constructor(private val appContext: Context) {
         runCatching {
             val toolsDir = File(homeDir, "tools")
             toolsDir.mkdirs()
+            File(homeDir, "bin").mkdirs()
             val names = appContext.assets.list("tools") ?: return
             for (name in names) {
                 val dest = File(toolsDir, name)
@@ -92,8 +93,9 @@ class BootstrapInstaller private constructor(private val appContext: Context) {
 
     fun envSpec(cwd: String): Array<String> {
         val path = System.getenv("PATH") ?: "/system/bin"
+        val userBin = File(homeDir, "bin")
         return arrayOf(
-            "PATH=${File(prefix, "bin").path}:$path",
+            "PATH=${userBin.path}:${File(prefix, "bin").path}:$path",
             "PREFIX=${prefix.path}",
             "TMPDIR=${File(prefix, "tmp").path}",
             "HOME=${homeDir.path}",
