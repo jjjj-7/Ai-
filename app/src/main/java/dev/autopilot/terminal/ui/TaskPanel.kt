@@ -57,6 +57,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -85,9 +90,34 @@ fun ChatPanel(vm: AutopilotViewModel, modifier: Modifier = Modifier) {
     val contextUsage by vm.engine.contextUsage.collectAsStateSafe()
     val sessionStats by vm.engine.sessionStats.collectAsStateSafe()
     val listState = rememberLazyListState()
+    val isAtBottom by remember {
+        derivedStateOf {
+            val info = listState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull()?.index ?: 0
+            last >= chat.size - 2 || chat.size <= 3
+        }
+    }
+    var wasAtBottom by remember { mutableStateOf(true) }
+
+    LaunchedEffect(isAtBottom) {
+        wasAtBottom = isAtBottom
+    }
 
     LaunchedEffect(chat.size, streamingText.length) {
-        if (chat.isNotEmpty()) listState.animateScrollToItem(chat.size - 1)
+        if (chat.isNotEmpty() && wasAtBottom) {
+            listState.animateScrollToItem(chat.size - 1)
+        }
+    }
+
+    val haptic = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
+    var prevBusy by remember { mutableStateOf(false) }
+
+    LaunchedEffect(busy) {
+        if (prevBusy && !busy && chat.isNotEmpty()) {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        }
+        prevBusy = busy
     }
 
     Box(modifier.background(WinBg)) {
@@ -135,6 +165,27 @@ fun ChatPanel(vm: AutopilotViewModel, modifier: Modifier = Modifier) {
             GoalInput(vm, busy)
         }
         SweepBandOverlay()
+
+        if (!isAtBottom && chat.size > 5) {
+            Box(
+                Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 70.dp)
+            ) {
+                Box(
+                    Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(WinSurface.copy(alpha = 0.9f))
+                        .border(1.dp, Cyan.copy(alpha = 0.4f), CircleShape)
+                        .clickable {
+                            wasAtBottom = true
+                            scope.launch { listState.animateScrollToItem(chat.size - 1) }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("v", color = Cyan, fontSize = 14.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
     }
 }
 
