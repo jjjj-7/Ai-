@@ -53,7 +53,8 @@ object Prompts {
 你的能力地图 (全部可直接使用):
 - 路径: 工作区=当前目录; /sdcard=全盘存储; ~/storage/downloads=下载; PREFIX=Termux 根
 - 工具箱: python3 ~/tools/search.py 关键词 | fetch.py URL | rss.py URL | sitemap.py 域名
-- 预置命令: mycmds weather qr shorten ipinfo openapp runbg joblog jobwait
+- 预置命令: mycmds weather qr shorten ipinfo openapp runbg joblog jobwait sysinfo battery screenshot
+- 服务与自动化 (把手机当服务器用): python3 -m http.server 8080 --directory /sdcard/xxx 让同一 WiFi 的设备浏览器直连手机取文件 (本机 IP 用 sysinfo 查看); pkg install openssh 后 sshd 让电脑 ssh -p 8022 远程连入完整终端; apt install cronie termux-services 后 crontab -e 写定时任务; clang 编译 C/C++, node/python 全栈服务端随手起
 - 应用调度: pm list packages -3 列应用; openapp 关键词 模糊启动; am start 深链直达任意 App 或设置面板
 - 造命令: PATH 首位 ~/bin —— 写脚本 chmod +x 即成全局命令 (shebang 用 /data/data/com.termux/files/usr/bin/ 真实路径), 新命令登记 ~/bin/README.md
 - 进化: 新技能追加进 ~/tools/user_skills.json; 记忆写进 AUTOPILOT.md (自动注入本提示)
@@ -78,7 +79,8 @@ object Prompts {
 能力地图 (全部可用, 方法不限):
 - 路径: 工作区=当前目录; /sdcard=全盘; ~/storage/downloads=下载; PREFIX=Termux 根
 - 工具箱: python3 ~/tools/search.py 关键词 | fetch.py URL | rss.py URL | sitemap.py 域名
-- 预置命令: mycmds weather qr shorten ipinfo openapp runbg joblog jobwait
+- 预置命令: mycmds weather qr shorten ipinfo openapp runbg joblog jobwait sysinfo battery screenshot
+- 服务与自动化: python3 -m http.server 8080 --directory 目录 让局域网设备直连手机; openssh+sshd 让电脑远程连入手机终端 (端口 8022); cronie 定时任务; clang/node/python 全栈开发随手可用
 - 应用调度: pm list packages -3 列应用; openapp 关键词 模糊启动; am start -n 包名/.活动 打开; am start -a android.intent.action.VIEW -d "scheme://..." 深链直达 (alipays:// taobao:// weixin:// 等); am start -a android.settings.WIFI_SETTINGS 开设置面板 (另有 BLUETOOTH/DISPLAY 等)
 - 造命令: PATH 首位 ~/bin —— 写脚本 chmod +x 即成全局命令, 交互终端同样可用; shebang 用 /data/data/com.termux/files/usr/bin/ 真实路径; 新命令登记 ~/bin/README.md
 - 进化: 新技能追加进 ~/tools/user_skills.json ([{"label":"按钮名","prompt":"完整指令"}]); 记忆写进 AUTOPILOT.md (自动注入本提示)
