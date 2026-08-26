@@ -329,10 +329,12 @@ private fun WelcomeBlock() {
         )
         Spacer(Modifier.height(12.dp))
         listOf(
-            Triple("●", AccentGreen, "27 个原生工具 — 文件/Git/Web/测试/子Agent/网络诊断"),
+            Triple("●", AccentGreen, "27 个原生工具 — 文件/Git/Web/测试/子Agent/网络"),
             Triple("◆", AccentPurple, "并行执行 + 流式输出 — 看 AI 边想边做"),
             Triple("▲", Cyan, "diff 预览 + 自动 lint + 撤销 — 代码变更安全可控"),
-            Triple("■", Color(0xFFE8C76B), "Web 搜索 + URL 抓取 — Claude Code 没有的能力")
+            Triple("■", Color(0xFFE8C76B), "Web 搜索 + URL 抓取 — Claude Code 没有的"),
+            Triple("★", Color(0xFF7EE3C8), "斜杠命令 + @文件引用 — 快捷交互"),
+            Triple("♦", Color(0xFFE876B0), "智能滚动 + 触觉反馈 + 会话统计")
         ).forEach { (mark, markColor, line) ->
             Row(Modifier.padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(mark, color = markColor, fontSize = 9.sp)
