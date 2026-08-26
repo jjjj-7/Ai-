@@ -13,6 +13,16 @@ val AccentGreen = Color(0xFF4ADE80)
 val AccentPurple = Color(0xFFA78BFA)
 val AccentAmber = Color(0xFFFBBF24)
 
+val WinBg = Color(0xFF07070D)
+val WinSurface = Color(0xFF10101C)
+val WinBorder = Color(0xFF1F2436)
+val TextMain = Color(0xFFE5E7EB)
+val TextDim = Color(0xFF9CA3AF)
+val DotR = Color(0xFFFF5F57)
+val DotY = Color(0xFFFEBC2E)
+val DotG = Color(0xFF28C840)
+val Cyan = Color(0xFF22D3EE)
+
 private val DarkScheme = darkColorScheme(
     primary = AccentGreen,
     onPrimary = Color.Black,

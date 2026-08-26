@@ -52,18 +52,16 @@ import dev.autopilot.terminal.agent.ChatRole
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.ui.graphics.graphicsLayer
 import dev.autopilot.terminal.agent.SkillDef
 import dev.autopilot.terminal.agent.SkillsRegistry
-
-private val WinBg = Color(0xFF07070D)
-private val WinSurface = Color(0xFF10101C)
-private val WinBorder = Color(0xFF1F2436)
-private val TextMain = Color(0xFFE5E7EB)
-private val TextDim = Color(0xFF9CA3AF)
-private val DotR = Color(0xFFFF5F57)
-private val DotY = Color(0xFFFEBC2E)
-private val DotG = Color(0xFF28C840)
-private val Cyan = Color(0xFF22D3EE)
 
 @Composable
 fun ChatPanel(vm: AutopilotViewModel, modifier: Modifier = Modifier) {
@@ -90,9 +88,7 @@ fun ChatPanel(vm: AutopilotViewModel, modifier: Modifier = Modifier) {
         Column(Modifier.fillMaxSize()) {
             WindowTitleBar(busy, onStop = { vm.engine.stop() })
 
-            Box(Modifier.fillMaxWidth().height(2.dp).background(
-                Brush.horizontalGradient(listOf(AccentGreen, AccentPurple, Cyan))
-            ))
+            FlowingGradientLine(Modifier.fillMaxWidth().height(2.dp))
 
             LazyColumn(
                 state = listState,
@@ -103,7 +99,9 @@ fun ChatPanel(vm: AutopilotViewModel, modifier: Modifier = Modifier) {
                 if (chat.isEmpty()) item { WelcomeBlock() }
                 itemsIndexed(chat) { idx, entry ->
                     val isLast = idx == chat.lastIndex
-                    TerminalMessage(entry, animate = isLast && entry.role == ChatRole.AI && !busy)
+                    SlideFadeIn {
+                        TerminalMessage(entry, animate = isLast && entry.role == ChatRole.AI && !busy)
+                    }
                 }
             }
 
@@ -116,24 +114,7 @@ fun ChatPanel(vm: AutopilotViewModel, modifier: Modifier = Modifier) {
 
             GoalInput(vm, busy)
         }
-        ScanlineOverlay()
-    }
-}
-
-@Composable
-private fun ScanlineOverlay() {
-    Canvas(Modifier.fillMaxSize()) {
-        val step = 4.dp.toPx()
-        var y = 0f
-        while (y < size.height) {
-            drawLine(
-                color = Color.Black.copy(alpha = 0.10f),
-                start = Offset(0f, y),
-                end = Offset(size.width, y),
-                strokeWidth = 1.dp.toPx()
-            )
-            y += step
-        }
+        SweepBandOverlay()
     }
 }
 
@@ -171,10 +152,17 @@ private fun WindowTitleBar(busy: Boolean, onStop: () -> Unit) {
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace,
-                modifier = Modifier.clickable(onClick = onStop).padding(4.dp)
+                modifier = Pulsing().clickable(onClick = onStop).padding(4.dp)
             )
         } else {
-            Text("● 待命", color = TextDim, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(7.dp).clip(CircleShape).background(AccentGreen),
+                    contentAlignment = Alignment.Center
+                ) {}
+                Spacer(Modifier.width(5.dp))
+                Text("待命", color = TextDim, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+            }
         }
     }
 }
@@ -281,18 +269,24 @@ private fun SkillChips(skills: List<SkillDef>, enabled: Boolean, onRun: (String)
         contentPadding = PaddingValues(horizontal = 12.dp),
         modifier = Modifier.padding(vertical = 4.dp)
     ) {
-        items(skills) { skill ->
-            Text(
-                skill.label,
-                color = AccentGreen,
-                fontSize = 11.sp,
-                fontFamily = FontFamily.Monospace,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(WinSurface)
-                    .clickable(enabled = enabled) { onRun(skill.prompt) }
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
-            )
+        itemsIndexed(skills) { idx, skill ->
+            ChipReveal(idx) {
+                val interaction = remember { MutableInteractionSource() }
+                val pressed by interaction.collectIsPressedAsState()
+                val scale by animateFloatAsState(if (pressed) 0.92f else 1f, tween(120))
+                Text(
+                    skill.label,
+                    color = AccentGreen,
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier
+                        .graphicsLayer { scaleX = scale; scaleY = scale }
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(WinSurface)
+                        .clickable(interactionSource = interaction, indication = null, enabled = enabled) { onRun(skill.prompt) }
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                )
+            }
         }
     }
 }
@@ -300,6 +294,12 @@ private fun SkillChips(skills: List<SkillDef>, enabled: Boolean, onRun: (String)
 @Composable
 private fun GoalInput(vm: AutopilotViewModel, busy: Boolean) {
     var goal by remember { mutableStateOf("") }
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    val borderColor by animateColorAsState(
+        if (focused) Cyan.copy(alpha = 0.65f) else WinBorder,
+        animationSpec = tween(220)
+    )
 
     fun sendChat() {
         if (goal.isBlank() || busy) return
@@ -323,12 +323,13 @@ private fun GoalInput(vm: AutopilotViewModel, busy: Boolean) {
                 color = TextMain,
                 fontFamily = FontFamily.Monospace
             ),
+            interactionSource = interaction,
             minLines = 1,
             maxLines = 3,
             shape = RoundedCornerShape(8.dp),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = WinBorder,
-                unfocusedBorderColor = WinBorder,
+                focusedBorderColor = borderColor,
+                unfocusedBorderColor = borderColor,
                 focusedContainerColor = WinBg,
                 unfocusedContainerColor = WinBg,
                 cursorColor = AccentGreen

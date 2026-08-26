@@ -1,5 +1,7 @@
 package dev.autopilot.terminal.ui
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Description
@@ -13,6 +15,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
@@ -36,51 +41,60 @@ fun AppRoot(vm: AutopilotViewModel = viewModel()) {
             RiskOnboarding(onAccept = vm::acceptRisk)
             return@AutopilotTheme
         }
-        val navController = rememberNavController()
-        val backStack by navController.currentBackStackEntryAsState()
-        val currentRoute = backStack?.destination?.route ?: Dest.Terminal.route
-
-        val navTarget by vm.navigateTab.collectAsStateSafe()
-        LaunchedEffect(navTarget) {
-            val target = navTarget ?: return@LaunchedEffect
-            runCatching {
-                navController.navigate(target) {
-                    popUpTo(Dest.Terminal.route) { saveState = true }
-                    launchSingleTop = true
-                }
-            }
-            vm.navigateTab.value = null
+        var showBoot by remember { mutableStateOf(true) }
+        Box(Modifier.fillMaxSize()) {
+            InnerNavHost(vm)
+            if (showBoot) BootOverlay(onDone = { showBoot = false })
         }
+    }
+}
 
-        Scaffold(
-            bottomBar = {
-                NavigationBar {
-                    listOf(Dest.Terminal, Dest.Files, Dest.Settings).forEach { dest ->
-                        NavigationBarItem(
-                            selected = currentRoute == dest.route,
-                            onClick = {
-                                navController.navigate(dest.route) {
-                                    popUpTo(Dest.Terminal.route) { saveState = true }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
-                            },
-                            icon = dest.icon,
-                            label = { Text(dest.label) }
-                        )
-                    }
+@Composable
+private fun InnerNavHost(vm: AutopilotViewModel) {
+    val navController = rememberNavController()
+    val backStack by navController.currentBackStackEntryAsState()
+    val currentRoute = backStack?.destination?.route ?: Dest.Terminal.route
+
+    val navTarget by vm.navigateTab.collectAsStateSafe()
+    LaunchedEffect(navTarget) {
+        val target = navTarget ?: return@LaunchedEffect
+        runCatching {
+            navController.navigate(target) {
+                popUpTo(Dest.Terminal.route) { saveState = true }
+                launchSingleTop = true
+            }
+        }
+        vm.navigateTab.value = null
+    }
+
+    Scaffold(
+        bottomBar = {
+            NavigationBar {
+                listOf(Dest.Terminal, Dest.Files, Dest.Settings).forEach { dest ->
+                    NavigationBarItem(
+                        selected = currentRoute == dest.route,
+                        onClick = {
+                            navController.navigate(dest.route) {
+                                popUpTo(Dest.Terminal.route) { saveState = true }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        },
+                        icon = dest.icon,
+                        label = { Text(dest.label) }
+                    )
                 }
             }
-        ) { padding ->
-            NavHost(
-                navController = navController,
-                startDestination = Dest.Terminal.route,
-                modifier = Modifier.padding(padding)
-            ) {
-                composable(Dest.Terminal.route) { TerminalScreen(vm) }
-                composable(Dest.Files.route) { FileTreeScreen(vm) }
-                composable(Dest.Settings.route) { ModelSettingsScreen(vm) }
-            }
+        }
+    ) { padding ->
+        NavHost(
+            navController = navController,
+            startDestination = Dest.Terminal.route,
+            modifier = Modifier.padding(padding)
+        ) {
+            composable(Dest.Terminal.route) { TerminalScreen(vm) }
+            composable(Dest.Files.route) { FileTreeScreen(vm) }
+            composable(Dest.Settings.route) { ModelSettingsScreen(vm) }
         }
     }
 }
