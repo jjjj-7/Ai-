@@ -105,6 +105,10 @@ class AgentEngine(
         _chat.value = (_chat.value + ChatEntry(role, text, System.currentTimeMillis(), toolName)).takeLast(500)
     }
 
+    fun injectSystem(text: String) {
+        say(ChatRole.SYSTEM, text)
+    }
+
     fun submit(goal: String, criteria: List<String>, maxIterations: Int) {
         if (loopJob?.isActive == true) {
             say(ChatRole.SYSTEM, "有任务正在执行中，请先等待完成或点击停止")
@@ -593,6 +597,8 @@ class AgentEngine(
     fun clearChat() {
         chatHistory.clear()
         _chat.value = emptyList()
+        _contextUsage.value = 0f
+        say(ChatRole.SYSTEM, "聊天历史已清空")
     }
 
     private suspend fun awaitConfirmDecision() {
@@ -690,6 +696,24 @@ class AgentEngine(
         runCatching { channelProvider()?.killCurrent() }
         say(ChatRole.SYSTEM, "已停止: $reason")
         _uiState.value = AgentUiState.Stopped(reason)
+    }
+
+    fun undoLastEdit(): String {
+        if (AgentTools.undoStacks.isEmpty()) {
+            say(ChatRole.SYSTEM, "没有可撤销的编辑")
+            return "没有可撤销的编辑"
+        }
+        val lastFile = AgentTools.undoStacks.keys.last()
+        val stack = AgentTools.undoStacks[lastFile]!!
+        if (stack.isEmpty()) {
+            say(ChatRole.SYSTEM, "没有可撤销的编辑")
+            return "没有可撤销的编辑"
+        }
+        val prev = stack.removeAt(stack.lastIndex)
+        File(lastFile).writeText(prev)
+        AgentTools.redoStacks.getOrPut(lastFile) { mutableListOf() }.add(File(lastFile).readText())
+        say(ChatRole.SYSTEM, "已撤销 $lastFile")
+        return "已撤销 $lastFile"
     }
 
     fun reset() {

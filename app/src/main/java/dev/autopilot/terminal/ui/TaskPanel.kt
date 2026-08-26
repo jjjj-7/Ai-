@@ -5,6 +5,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -700,6 +701,66 @@ private fun StyledText(text: String, bold: Boolean = false, size: Int = 13) {
     Text(annotated, lineHeight = (size + 6).sp)
 }
 
+private data class SlashCommand(val cmd: String, val desc: String, val icon: String)
+
+private val SLASH_COMMANDS = listOf(
+    SlashCommand("/help", "显示所有可用命令", "?"),
+    SlashCommand("/tools", "列出 27 个内置工具", "#"),
+    SlashCommand("/clear", "清空聊天历史", "x"),
+    SlashCommand("/status", "显示会话状态 (迭代/上下文)", "i"),
+    SlashCommand("/undo", "撤销最后一次文件编辑", "undo"),
+    SlashCommand("/stop", "停止当前任务", "[]"),
+    SlashCommand("/model", "显示当前模型配置", "M")
+)
+
+private fun handleSlashCommand(input: String, vm: AutopilotViewModel): Boolean {
+    val parts = input.split(" ", limit = 2)
+    val cmd = parts[0].lowercase()
+    when (cmd) {
+        "/help" -> {
+            vm.engine.injectSystem(buildString {
+                appendLine("可用斜杠命令:")
+                SLASH_COMMANDS.forEach { c ->
+                    appendLine("  ${c.icon} ${c.cmd.padEnd(10)} ${c.desc}")
+                }
+            })
+        }
+        "/tools" -> {
+            vm.engine.injectSystem(buildString {
+                appendLine("27 个内置工具:")
+                val groups = listOf(
+                    "文件操作" to listOf("read_file", "write_file", "edit_file", "multi_edit", "undo_edit", "glob", "grep", "tree"),
+                    "执行" to listOf("execute", "batch", "runbg", "joblog", "wait"),
+                    "Web/网络" to listOf("web_search", "web_fetch", "dns_lookup", "port_check"),
+                    "Git" to listOf("git_status", "git_diff", "git_commit"),
+                    "代码智能" to listOf("run_tests", "auto_lint"),
+                    "Agent" to listOf("dispatch_subagent", "listen", "todo", "finish", "abort")
+                )
+                groups.forEach { (name, tools) ->
+                    appendLine("  $name: ${tools.joinToString(", ")}")
+                }
+            })
+        }
+        "/clear" -> vm.engine.clearChat()
+        "/status" -> {
+            vm.engine.injectSystem(buildString {
+                appendLine("会话状态:")
+                appendLine("  上下文使用: ${(vm.engine.contextUsage.value * 100).toInt()}%")
+                appendLine("  消息数: ${vm.engine.chat.value.size}")
+                appendLine("  流式输出: ${if (vm.engine.streamingText.value.isNotEmpty()) "有" else "无"}")
+            })
+        }
+        "/undo" -> vm.engine.undoLastEdit()
+        "/stop" -> vm.engine.stop("用户通过 /stop 命令停止")
+        "/model" -> {
+            val cfg = vm.config.value
+            vm.engine.injectSystem("当前模型: ${cfg.model}\nBase URL: ${cfg.baseUrl}\n最大迭代: ${cfg.maxIterations}")
+        }
+        else -> return false
+    }
+    return true
+}
+
 @Composable
 private fun GoalInput(vm: AutopilotViewModel, busy: Boolean) {
     var goal by remember { mutableStateOf("") }
@@ -715,6 +776,10 @@ private fun GoalInput(vm: AutopilotViewModel, busy: Boolean) {
     fun sendChat() {
         if (goal.isBlank() || busy) return
         val msg = goal.trim()
+        if (msg.startsWith("/") && handleSlashCommand(msg, vm)) {
+            goal = ""
+            return
+        }
         if (msg.isNotBlank() && (history.isEmpty() || history.last() != msg)) {
             history.add(msg)
         }
@@ -787,9 +852,32 @@ private fun GoalInput(vm: AutopilotViewModel, busy: Boolean) {
                 decorationBox = { inner ->
                     Box {
                         if (goal.isEmpty()) {
-                            Text("输入指令... (↑↓ 历史回溯)", fontSize = 12.sp, color = Color(0xFF565F73))
+                            Text("输入指令... (/ 命令, ↑↓ 历史)", fontSize = 12.sp, color = Color(0xFF565F73))
                         }
                         inner()
+                        if (goal.startsWith("/") && goal.length <= 15 && !goal.contains(" ")) {
+                            val matches = SLASH_COMMANDS.filter { it.cmd.startsWith(goal.lowercase()) }
+                            if (matches.isNotEmpty()) {
+                                DropdownMenu(
+                                    expanded = true,
+                                    onDismissRequest = {},
+                                    modifier = Modifier.background(WinSurface).border(1.dp, Cyan.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                                ) {
+                                    matches.take(5).forEach { sc ->
+                                        Row(
+                                            Modifier.fillMaxWidth().clickable {
+                                                goal = sc.cmd + " "
+                                            }.padding(horizontal = 12.dp, vertical = 7.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(sc.icon, color = AccentPurple, fontSize = 12.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.width(28.dp))
+                                            Text(sc.cmd, color = AccentGreen, fontSize = 12.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, modifier = Modifier.width(60.dp))
+                                            Text(sc.desc, color = TextDim, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             )

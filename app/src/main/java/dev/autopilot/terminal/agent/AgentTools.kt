@@ -1038,8 +1038,8 @@ object AgentTools {
         }
     }
 
-    private val undoStacks = mutableMapOf<String, MutableList<String>>()
-    private val redoStacks = mutableMapOf<String, MutableList<String>>()
+    internal val undoStacks = mutableMapOf<String, MutableList<String>>()
+    internal val redoStacks = mutableMapOf<String, MutableList<String>>()
 
     private fun detectTestCommand(projectDir: File, filter: String?): String? {
         val f = filter?.let { " -k \"$it\"" } ?: ""
