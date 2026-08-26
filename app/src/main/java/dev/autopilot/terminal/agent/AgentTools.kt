@@ -443,6 +443,7 @@ object AgentTools {
                     } else {
                         sb.append("Overwritten ${file.absolutePath} (${content.length} bytes, was ${oldContent.length} bytes)\n")
                     }
+                    sb.append(autoLint(file, workspaceRoot, channel))
                     ToolResult(sb.toString())
                 } catch (e: Exception) {
                     ToolResult("Failed to write: ${e.message}", isError = true)
@@ -484,6 +485,7 @@ object AgentTools {
                     if (old != null) sb.append("- $old\n")
                     if (newL != null) sb.append("+ $newL\n")
                 }
+                sb.append(autoLint(file, workspaceRoot, channel))
                 ToolResult(sb.toString())
             }
 
@@ -650,5 +652,74 @@ object AgentTools {
                 }
             }
         }
+    }
+
+    private suspend fun autoLint(
+        file: File,
+        workspaceRoot: File,
+        channel: CommandChannel?
+    ): String {
+        if (channel == null) return ""
+        val ext = file.extension.lowercase()
+        val projectDir = findProjectRoot(file, workspaceRoot) ?: workspaceRoot
+
+        val lintCmd = when {
+            File(projectDir, "package.json").exists() && ext in listOf("js", "ts", "jsx", "tsx", "mjs") -> {
+                val pkg = runCatching {
+                    Json { ignoreUnknownKeys = true }
+                        .parseToJsonElement(File(projectDir, "package.json").readText())
+                        .let { it as? JsonObject }
+                }.getOrNull()
+                val scripts = pkg?.get("scripts") as? JsonObject
+                when {
+                    scripts?.get("lint") != null -> "npm run lint 2>&1 | tail -20"
+                    scripts?.get("typecheck") != null -> "npm run typecheck 2>&1 | tail -20"
+                    else -> null
+                }
+            }
+            File(projectDir, "build.gradle.kts").exists() && ext == "kt" ->
+                "./gradlew ktlintCheck --quiet 2>&1 | tail -20 || true"
+            File(projectDir, "build.gradle").exists() && ext == "kt" ->
+                "./gradlew lint --quiet 2>&1 | tail -20 || true"
+            ext == "py" && File(projectDir, "pyproject.toml").exists() ->
+                "cd ${projectDir.absolutePath} && ruff check ${file.absolutePath} 2>&1 | tail -15 || true"
+            ext == "py" && File(projectDir, "setup.py").exists() ->
+                "python3 -m py_compile ${file.absolutePath} 2>&1 | tail -15 || true"
+            ext == "go" && File(projectDir, "go.mod").exists() ->
+                "cd ${projectDir.absolutePath} && gofmt -l ${file.absolutePath} 2>&1 || true"
+            ext == "rs" && File(projectDir, "Cargo.toml").exists() ->
+                "cd ${projectDir.absolutePath} && cargo check 2>&1 | tail -15 || true"
+            else -> null
+        } ?: return ""
+
+        return try {
+            val result = channel.exec(lintCmd, 30_000)
+            if (result.output.isBlank() || result.output.contains("no issues") || result.output.contains("All files")) {
+                "\n[lint] OK"
+            } else {
+                "\n[lint] ${result.output.take(300)}"
+            }
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    private fun findProjectRoot(file: File, workspaceRoot: File): File? {
+        var dir = file.parentFile
+        while (dir != null && dir.absolutePath != "/") {
+            if (File(dir, "package.json").exists() ||
+                File(dir, "build.gradle").exists() ||
+                File(dir, "build.gradle.kts").exists() ||
+                File(dir, "go.mod").exists() ||
+                File(dir, "Cargo.toml").exists() ||
+                File(dir, "pyproject.toml").exists() ||
+                File(dir, "setup.py").exists()
+            ) {
+                return dir
+            }
+            if (dir.absolutePath == workspaceRoot.absolutePath) return dir
+            dir = dir.parentFile
+        }
+        return null
     }
 }

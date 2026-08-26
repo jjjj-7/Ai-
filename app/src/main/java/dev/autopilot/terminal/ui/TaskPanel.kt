@@ -219,10 +219,10 @@ private fun WelcomeBlock() {
         )
         Spacer(Modifier.height(12.dp))
         listOf(
-            Triple("●", AccentGreen, "原生工具调用 — read/write/edit/grep/glob 零延迟"),
+            Triple("●", AccentGreen, "14 个原生工具 — read/write/edit/grep/glob/subagent/listen"),
             Triple("◆", AccentPurple, "并行执行 — batch 多命令同时跑, 倍速完成"),
             Triple("▲", Cyan, "实时流式输出 — 看 AI 边想边做, 不再盲等"),
-            Triple("■", Color(0xFFE8C76B), "智能错误诊断 — 自动分析根因, 不盲目重试")
+            Triple("■", Color(0xFFE8C76B), "智能错误诊断 + diff 预览 + 自动 lint")
         ).forEach { (mark, markColor, line) ->
             Row(Modifier.padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(mark, color = markColor, fontSize = 9.sp)
@@ -264,7 +264,7 @@ private fun TerminalMessage(entry: ChatEntry, animate: Boolean) {
             Spacer(Modifier.width(10.dp))
             Column {
                 if (animate) TypewriterText(entry.text.take(2000))
-                else Text(entry.text.take(2000), color = TextMain, fontSize = 13.sp, lineHeight = 19.sp)
+                else SimpleMarkdown(entry.text.take(2000))
             }
         }
         ChatRole.CMD -> SurfaceCard(accent = toolAccent(entry.toolName)) {
@@ -533,6 +533,114 @@ private fun TypewriterText(full: String) {
         },
         color = TextMain, fontSize = 13.sp, lineHeight = 19.sp
     )
+}
+
+@Composable
+private fun SimpleMarkdown(text: String) {
+    val lines = text.split("\n")
+    var inCodeBlock = false
+    val codeBlockLines = mutableListOf<String>()
+
+    Column {
+        for (line in lines) {
+            if (line.trimStart().startsWith("```")) {
+                if (inCodeBlock) {
+                    SurfaceCard(accent = Cyan.copy(alpha = 0.25f)) {
+                        Text(
+                            codeBlockLines.joinToString("\n").take(1500),
+                            color = Color(0xFFC8D3E0),
+                            fontSize = 10.sp,
+                            lineHeight = 14.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                    codeBlockLines.clear()
+                    inCodeBlock = false
+                } else {
+                    inCodeBlock = true
+                }
+                continue
+            }
+            if (inCodeBlock) {
+                codeBlockLines.add(line)
+                continue
+            }
+            when {
+                line.trimStart().startsWith("- ") || line.trimStart().startsWith("* ") -> {
+                    val content = line.trimStart().drop(2)
+                    Row(Modifier.padding(vertical = 1.dp)) {
+                        Text("•", color = Cyan, fontSize = 13.sp, modifier = Modifier.width(16.dp))
+                        StyledText(content)
+                    }
+                }
+                line.trimStart().startsWith("# ") -> {
+                    StyledText(line.trimStart().drop(2), bold = true, size = 14)
+                }
+                line.trimStart().startsWith("## ") -> {
+                    StyledText(line.trimStart().drop(3), bold = true, size = 13)
+                }
+                line.isBlank() -> Spacer(Modifier.height(4.dp))
+                else -> StyledText(line)
+            }
+        }
+        if (codeBlockLines.isNotEmpty()) {
+            SurfaceCard(accent = Cyan.copy(alpha = 0.25f)) {
+                Text(
+                    codeBlockLines.joinToString("\n").take(1500),
+                    color = Color(0xFFC8D3E0),
+                    fontSize = 10.sp,
+                    lineHeight = 14.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun StyledText(text: String, bold: Boolean = false, size: Int = 13) {
+    val annotated = buildAnnotatedString {
+        var i = 0
+        var currentBold = bold
+        val sb = StringBuilder()
+        fun flush() {
+            if (sb.isNotEmpty()) {
+                withStyle(SpanStyle(
+                    fontWeight = if (currentBold) FontWeight.Bold else FontWeight.Normal,
+                    color = TextMain,
+                    fontSize = size.sp,
+                    fontFamily = if (currentBold) FontFamily.Default else FontFamily.Monospace
+                )) { append(sb.toString()) }
+                sb.clear()
+            }
+        }
+        while (i < text.length) {
+            if (i + 2 <= text.length && text[i] == '*' && text[i + 1] == '*') {
+                flush()
+                currentBold = !currentBold
+                i += 2
+            } else if (text[i] == '`') {
+                flush()
+                val end = text.indexOf('`', i + 1)
+                if (end > i) {
+                    withStyle(SpanStyle(
+                        color = Cyan,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = size.sp
+                    )) { append(text.substring(i + 1, end)) }
+                    i = end + 1
+                } else {
+                    sb.append(text[i])
+                    i++
+                }
+            } else {
+                sb.append(text[i])
+                i++
+            }
+        }
+        flush()
+    }
+    Text(annotated, lineHeight = (size + 6).sp)
 }
 
 @Composable
