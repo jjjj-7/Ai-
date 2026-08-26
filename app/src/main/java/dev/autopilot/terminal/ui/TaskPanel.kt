@@ -406,36 +406,50 @@ private fun TerminalMessage(entry: ChatEntry, animate: Boolean) {
                 Text("# $it", color = TextDim, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
             }
         }
-        ChatRole.OUTPUT -> SurfaceCard(accent = WinBorder) {
-            val text = entry.text.take(1500)
-            val hasDiff = entry.toolName == "edit_file" || entry.toolName == "write_file"
-            if (hasDiff) {
-                val lines = text.split("\n")
-                Column {
-                    lines.forEach { line ->
-                        val color = when {
-                            line.startsWith("+ ") || line.startsWith("++ ") || line.startsWith("+\t") -> Color(0xFF4EC9B0)
-                            line.startsWith("- ") || line.startsWith("-- ") || line.startsWith("-\t") -> Color(0xFFF44747)
-                            line.startsWith("--- diff") || line.startsWith("--- new file") -> Cyan
-                            else -> Color(0xFFB5BDCA)
+        ChatRole.OUTPUT -> {
+            var expanded by remember(entry) { mutableStateOf(false) }
+            SurfaceCard(accent = WinBorder) {
+                val fullText = entry.text
+                val isLong = fullText.length > 500
+                val text = if (isLong && !expanded) fullText.take(500) + "\n... (+${fullText.length - 500} chars)" else fullText.take(3000)
+                val hasDiff = entry.toolName == "edit_file" || entry.toolName == "write_file" || entry.toolName == "multi_edit"
+                if (hasDiff) {
+                    val lines = text.split("\n")
+                    Column {
+                        lines.forEach { line ->
+                            val color = when {
+                                line.startsWith("+ ") || line.startsWith("++ ") || line.startsWith("+\t") -> Color(0xFF4EC9B0)
+                                line.startsWith("- ") || line.startsWith("-- ") || line.startsWith("-\t") -> Color(0xFFF44747)
+                                line.startsWith("--- diff") || line.startsWith("--- new file") -> Cyan
+                                else -> Color(0xFFB5BDCA)
+                            }
+                            Text(
+                                line,
+                                color = color,
+                                fontSize = 10.sp,
+                                lineHeight = 15.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
                         }
-                        Text(
-                            line,
-                            color = color,
-                            fontSize = 10.sp,
-                            lineHeight = 15.sp,
-                            fontFamily = FontFamily.Monospace
-                        )
                     }
+                } else {
+                    Text(
+                        text,
+                        color = Color(0xFFB5BDCA),
+                        fontSize = 10.sp,
+                        lineHeight = 15.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
                 }
-            } else {
-                Text(
-                    text,
-                    color = Color(0xFFB5BDCA),
-                    fontSize = 10.sp,
-                    lineHeight = 15.sp,
-                    fontFamily = FontFamily.Monospace
-                )
+                if (isLong) {
+                    Text(
+                        if (expanded) "[- 收起]" else "[+ 展开 ${fullText.length} chars]",
+                        color = Cyan.copy(alpha = 0.6f),
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.clickable { expanded = !expanded }.padding(top = 4.dp)
+                    )
+                }
             }
         }
         ChatRole.SYSTEM -> Row(Modifier.height(IntrinsicSize.Min)) {
