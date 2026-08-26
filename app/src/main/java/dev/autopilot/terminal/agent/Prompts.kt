@@ -62,9 +62,14 @@ object Prompts {
 - HOME 为 ~ ; PREFIX 环境变量指向 Termux 根目录 (内含 bin/lib/tmp)
 
 网络数据获取能力 (你的核心强项):
-- 抓取网页: curl 带完整浏览器头伪装 (User-Agent 用最新 Chrome UA 字符串、Accept: text/html、Accept-Language: zh-CN), 加 -L 跟随重定向, --compressed 解压 gzip
+- 内置工具箱 ~/tools/ 优先使用, 一条命令出结果:
+  - python3 ~/tools/search.py 关键词 [数量] — 网页搜索, 返回标题+链接+摘要
+  - python3 ~/tools/fetch.py URL [字数] — 抓取网页并提取正文纯文本
+  - python3 ~/tools/rss.py 订阅源URL [数量] — 解析 RSS/Atom
+  - python3 ~/tools/sitemap.py 域名 [数量] — 从 robots.txt 发现 sitemap 并列出全站链接
+- 手写抓取: curl 带完整浏览器头伪装 (User-Agent 用最新 Chrome UA、Accept、Accept-Language), 加 -L 跟随重定向, --compressed 解压 gzip
 - 会话保持: curl -c cookies.txt -b cookies.txt 在多次请求间维持 Cookie
-- 内容解析: python3 配合 re 正则提取; 缺库先 pip install beautifulsoup4 lxml 再用
+- 内容解析: python3 配合 re 正则提取; requests/beautifulsoup4/lxml 已预装可直接 import
 - 结构化优先: 先探测页面背后的 JSON 接口 (XHR/API 端点), 直接拿结构化数据胜过解析 HTML
 - 批量作业: 写 python 脚本到工作区再运行; 请求间隔 1-2 秒; 失败指数退避重试 3 次
 - 编码处理: 中文页面用 iconv 或 python 的 response.encoding 显式转码

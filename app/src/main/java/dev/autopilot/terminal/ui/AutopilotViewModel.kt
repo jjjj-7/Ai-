@@ -47,6 +47,7 @@ class AutopilotViewModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch {
             runCatching { ensureBootstrap() }
+                .onSuccess { if (installer.isReady()) preinstallPythonDeps() }
                 .onFailure { android.util.Log.e(TAG, "bootstrap failed", it) }
         }
     }
@@ -64,14 +65,6 @@ class AutopilotViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _config = MutableStateFlow(configStore.load())
     val config: StateFlow<ModelConfig> = _config
-
-    init {
-        channel.bindWorkspace { (getApplication<dev.autopilot.terminal.AutopilotApp>()).workspaceRoot.absolutePath }
-        viewModelScope.launch {
-            runCatching { ensureBootstrap() }
-                .onFailure { android.util.Log.e(TAG, "bootstrap failed", it) }
-        }
-    }
 
     fun acceptRisk() {
         _riskAccepted.value = true
@@ -91,6 +84,18 @@ class AutopilotViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun ensureBootstrap() {
         if (installer.isReady()) return
         installer.ensureInstalled()
+    }
+
+    private fun preinstallPythonDeps() {
+        appCtx.appScope.launch {
+            runCatching {
+                registry.createOnce(
+                    "pip-preload",
+                    arrayOf("sh", "-c", "pip install -q requests beautifulsoup4 lxml 2>/dev/null; echo pip-done"),
+                    appCtx.workspaceRoot.absolutePath
+                )
+            }
+        }
     }
 
     fun submitTask(goal: String, criteria: List<String>) {

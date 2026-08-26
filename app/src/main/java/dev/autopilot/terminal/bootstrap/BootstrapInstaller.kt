@@ -33,10 +33,12 @@ class BootstrapInstaller private constructor(private val appContext: Context) {
             val result = kotlinx.coroutines.withTimeoutOrNull(INSTALL_TIMEOUT_MS) {
                 if (isReady()) {
                     setupStorageLinks()
+                    installTools()
                     "ready"
                 } else {
                     installFromAssets()
                     setupStorageLinks()
+                    installTools()
                     if (isReady()) "ready" else null
                 }
             }
@@ -48,6 +50,20 @@ class BootstrapInstaller private constructor(private val appContext: Context) {
         } catch (t: Throwable) {
             android.util.Log.e(TAG, "bootstrap install failed", t)
             _state.value = InstallState.Failed(t.message ?: t.javaClass.simpleName)
+        }
+    }
+
+    fun installTools() {
+        runCatching {
+            val toolsDir = File(homeDir, "tools")
+            toolsDir.mkdirs()
+            val names = appContext.assets.list("tools") ?: return
+            for (name in names) {
+                val dest = File(toolsDir, name)
+                appContext.assets.open("tools/$name").use { input ->
+                    dest.outputStream().use { output -> input.copyTo(output) }
+                }
+            }
         }
     }
 
