@@ -80,6 +80,9 @@ class AgentEngine(
     private val _streamingText = MutableStateFlow("")
     val streamingText: StateFlow<String> = _streamingText
 
+    private val _contextUsage = MutableStateFlow(0f)
+    val contextUsage: StateFlow<Float> = _contextUsage
+
     data class TodoItem(val text: String, val done: Boolean)
     private val _todos = MutableStateFlow<List<TodoItem>>(emptyList())
     val todos: StateFlow<List<TodoItem>> = _todos
@@ -158,6 +161,7 @@ class AgentEngine(
             db.taskDao().byId(taskId)?.let { db.taskDao().update(it.copy(iterations = iteration)) }
             compactIfNeeded(messages, systemCount = 2)
             trimWindow(messages, systemCount = 2, keep = WINDOW_KEEP)
+            _contextUsage.value = estimateTokens(messages).toFloat() / (MAX_CONTEXT_CHARS / 4).toFloat().coerceAtLeast(1f)
 
             _uiState.value = AgentUiState.Streaming(taskId, iteration)
             val (fullText, toolCalls, llmError) = awaitLlm(messages)

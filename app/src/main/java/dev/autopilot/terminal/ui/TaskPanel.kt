@@ -80,6 +80,7 @@ fun ChatPanel(vm: AutopilotViewModel, modifier: Modifier = Modifier) {
     val busy by vm.engine.busy.collectAsStateSafe()
     val todos by vm.engine.todos.collectAsStateSafe()
     val streamingText by vm.engine.streamingText.collectAsStateSafe()
+    val contextUsage by vm.engine.contextUsage.collectAsStateSafe()
     val listState = rememberLazyListState()
 
     LaunchedEffect(chat.size, streamingText.length) {
@@ -90,6 +91,8 @@ fun ChatPanel(vm: AutopilotViewModel, modifier: Modifier = Modifier) {
         NebulaBackdrop()
         Column(Modifier.fillMaxSize()) {
             WindowTitleBar(busy, state, onStop = { vm.engine.stop() })
+
+            ContextUsageBar(contextUsage)
 
             FlowingGradientLine(Modifier.fillMaxWidth().height(2.dp))
 
@@ -184,6 +187,33 @@ private fun WindowTitleBar(busy: Boolean, state: AgentUiState, onStop: () -> Uni
                 Text("待命", color = TextDim, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
             }
         }
+    }
+}
+
+@Composable
+private fun ContextUsageBar(usage: Float) {
+    val pct = (usage * 100).toInt().coerceIn(0, 100)
+    if (pct == 0 && usage == 0f) return
+    val color = when {
+        pct >= 85 -> Color(0xFFFF6B6B)
+        pct >= 60 -> Color(0xFFE8C76B)
+        else -> AccentGreen
+    }
+    Row(
+        Modifier.fillMaxWidth().background(WinSurface.copy(alpha = 0.5f)).padding(horizontal = 12.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("ctx", color = TextDim, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+        Spacer(Modifier.width(6.dp))
+        Box(
+            Modifier.weight(1f).height(4.dp).clip(RoundedCornerShape(2.dp)).background(WinBorder)
+        ) {
+            Box(
+                Modifier.fillMaxWidth(usage.coerceIn(0f, 1f)).fillMaxHeight().clip(RoundedCornerShape(2.dp)).background(color)
+            )
+        }
+        Spacer(Modifier.width(6.dp))
+        Text("${pct}%", color = color, fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
     }
 }
 
