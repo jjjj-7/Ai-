@@ -57,12 +57,37 @@ class BootstrapInstaller private constructor(private val appContext: Context) {
         runCatching {
             val toolsDir = File(homeDir, "tools")
             toolsDir.mkdirs()
-            File(homeDir, "bin").mkdirs()
+            val binDir = File(homeDir, "bin")
+            binDir.mkdirs()
             val names = appContext.assets.list("tools") ?: return
             for (name in names) {
                 val dest = File(toolsDir, name)
                 appContext.assets.open("tools/$name").use { input ->
                     dest.outputStream().use { output -> input.copyTo(output) }
+                }
+            }
+            appContext.assets.list("cmds")?.forEach { name ->
+                val dest = File(binDir, name.removeSuffix(".sh"))
+                appContext.assets.open("cmds/$name").use { input ->
+                    dest.outputStream().use { output -> input.copyTo(output) }
+                }
+                dest.setExecutable(true, false)
+                dest.setReadable(true, false)
+                dest.setWritable(false, false)
+            }
+            setupShellPath()
+        }
+    }
+
+    private fun setupShellPath() {
+        val userBin = File(homeDir, "bin").absolutePath
+        val guard =
+            "case \":\$PATH:\" in *\":$userBin:\"*) ;; *) export PATH=\"$userBin:\$PATH\";; esac"
+        listOf(".profile", ".bashrc").forEach { name ->
+            runCatching {
+                val f = File(homeDir, name)
+                if (!f.isFile || !f.readText().contains(userBin)) {
+                    f.appendText("\n# autopilot custom commands\nguard\n".replace("guard", guard))
                 }
             }
         }

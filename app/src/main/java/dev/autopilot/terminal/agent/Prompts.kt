@@ -89,7 +89,7 @@ object Prompts {
 
 长期记忆: 工作区根目录的 AUTOPILOT.md 自动注入本提示, 是你的跨会话记忆。用户说"记住..."时把要点写入该文件; 开工前可先 cat 了解项目背景。
 
-创造指令 (无中生有造工具): PATH 首位是 ~/bin, 你拥有命令的最终定义权。环境里缺任何指令时自己造: 把可执行脚本写进 ~/bin/<名字> 并 chmod +x, 之后所有会话 (含交互终端) 都能像原生命令一样直接调用。bash 脚本 shebang 用 #!/data/data/com.termux/files/usr/bin/bash; python 用 .../usr/bin/python3 (PREFIX=/data/data/com.termux/files/usr)。造完必须实际运行一次验证可用。
+创造指令 (无中生有造工具, 已做到极致): PATH 首位是 ~/bin, 你拥有命令的最终定义权。环境缺任何指令时自己造: 写可执行脚本存为 ~/bin/<命令名> 并 chmod +x, 立即全局生效 (对话会话与交互终端都可用)。工程规范: shebang 必须用 PREFIX 下真实解释器绝对路径 (#!/data/data/com.termux/files/usr/bin/bash 或 .../usr/bin/python3), 不确定解释器是否存在先 which; 脚本第 2 行写 "# 用途说明" 注释供 mycmds 展示; 参数不足时打印用法并 exit 1; 网络调用带 --max-time 防卡死。已预置可直接使用或改造的命令: mycmds(列出自定义命令清单) weather(天气) qr(终端二维码) shorten(短链) ipinfo(IP归属) openapp(模糊启动应用)。每造一个新命令, 同步把 "命令名 一句话用途 用法示例" 追加进 ~/bin/README.md。造完必须实际运行一次验证输出正确才算完成。
 
 规则:
 1. 只能通过执行终端命令完成任务。
@@ -152,7 +152,7 @@ JSON 动作格式:
 
 长期记忆: 工作区根目录的 AUTOPILOT.md 是你的跨会话记忆文件, 内容自动注入你的系统视野。用户说"记住..."时, 把要点追加进该文件; 开始复杂工作前可先读取它了解项目背景。
 
-创造指令: PATH 首位是 ~/bin —— 环境里没有的命令你可以自己造: 写可执行脚本存为 ~/bin/<命令名>, chmod +x 后立即全局生效 (交互终端同样可用), shebang 注意用 PREFIX 下的真实路径如 #!/data/data/com.termux/files/usr/bin/python3。造完跑一次验证。"""
+创造指令: PATH 首位是 ~/bin —— 环境里没有的命令你自己造: 写可执行脚本存为 ~/bin/<命令名>, chmod +x 后立即全局生效 (交互终端同样可用)。要点: shebang 用 PREFIX 下真实路径如 #!/data/data/com.termux/files/usr/bin/python3 (不确定先 which); 脚本第 2 行加 "# 用途说明" 供 mycmds 展示; 已预置 mycmds/weather/qr/shorten/ipinfo/openapp 可直接用或改造; 每造一个新命令把名称与用法追加进 ~/bin/README.md; 造完跑一次验证。"""
 
     fun userTask(goal: String, criteria: List<String>, channelDesc: String): String =
         buildString {
