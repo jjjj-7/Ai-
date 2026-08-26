@@ -855,11 +855,18 @@ private fun handleSlashCommand(input: String, vm: AutopilotViewModel): Boolean {
         }
         "/clear" -> vm.engine.clearChat()
         "/status" -> {
+            val stats = vm.engine.sessionStats.value
+            val cost = stats.totalTokens * 0.2 / 1_000_000.0
             vm.engine.injectSystem(buildString {
                 appendLine("会话状态:")
                 appendLine("  上下文使用: ${(vm.engine.contextUsage.value * 100).toInt()}%")
+                appendLine("  迭代轮次: ${stats.iterations}")
+                appendLine("  总 Token: ${stats.totalTokens}")
+                appendLine("  工具调用: ${stats.toolsCalled}")
+                appendLine("  文件修改: ${stats.filesModified}")
+                appendLine("  命令执行: ${stats.commandsRun}")
+                appendLine("  估算成本: \$${"%.4f".format(cost)}")
                 appendLine("  消息数: ${vm.engine.chat.value.size}")
-                appendLine("  流式输出: ${if (vm.engine.streamingText.value.isNotEmpty()) "有" else "无"}")
             })
         }
         "/undo" -> vm.engine.undoLastEdit()
