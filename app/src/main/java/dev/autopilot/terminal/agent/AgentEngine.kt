@@ -83,6 +83,16 @@ class AgentEngine(
     private val _contextUsage = MutableStateFlow(0f)
     val contextUsage: StateFlow<Float> = _contextUsage
 
+    data class SessionStats(
+        val iterations: Int = 0,
+        val totalTokens: Int = 0,
+        val toolsCalled: Int = 0,
+        val filesModified: Int = 0,
+        val commandsRun: Int = 0
+    )
+    private val _sessionStats = MutableStateFlow(SessionStats())
+    val sessionStats: StateFlow<SessionStats> = _sessionStats
+
     data class TodoItem(val text: String, val done: Boolean)
     private val _todos = MutableStateFlow<List<TodoItem>>(emptyList())
     val todos: StateFlow<List<TodoItem>> = _todos
@@ -114,6 +124,7 @@ class AgentEngine(
             say(ChatRole.SYSTEM, "有任务正在执行中，请先等待完成或点击停止")
             return
         }
+        _sessionStats.value = SessionStats()
         val channel = channelProvider() ?: run {
             _uiState.value = AgentUiState.Failed("终端会话未就绪，请先完成环境安装")
             say(ChatRole.SYSTEM, "终端环境未就绪，任务未启动")
@@ -162,6 +173,7 @@ class AgentEngine(
 
         while (iteration < maxIterations) {
             iteration++
+            _sessionStats.value = _sessionStats.value.copy(iterations = iteration)
             db.taskDao().byId(taskId)?.let { db.taskDao().update(it.copy(iterations = iteration)) }
             compactIfNeeded(messages, systemCount = 2)
             trimWindow(messages, systemCount = 2, keep = WINDOW_KEEP)
@@ -170,6 +182,9 @@ class AgentEngine(
             _uiState.value = AgentUiState.Streaming(taskId, iteration)
             val (fullText, toolCalls, llmError) = awaitLlm(messages)
             _streamingText.value = ""
+            _sessionStats.value = _sessionStats.value.copy(
+                totalTokens = _sessionStats.value.totalTokens + estimateTokens(messages)
+            )
 
             if (llmError != null) {
                 failTask(taskId, "模型调用失败: $llmError")
@@ -568,7 +583,17 @@ class AgentEngine(
                         val outputDisplay = if (result.output.length > 1200) {
                             result.output.take(500) + "\n\n[... truncated ...]\n\n" + result.output.takeLast(300)
                         } else result.output
-                        say(ChatRole.OUTPUT, outputDisplay, toolName = tc.function)
+            say(ChatRole.OUTPUT, outputDisplay, toolName = tc.function)
+
+            _sessionStats.value = _sessionStats.value.copy(
+                toolsCalled = _sessionStats.value.toolsCalled + 1,
+                commandsRun = if (tc.function in listOf(AgentTools.EXECUTE, AgentTools.BATCH, AgentTools.RUNBG)) _sessionStats.value.commandsRun + 1 else _sessionStats.value.commandsRun,
+                filesModified = if (tc.function in listOf(AgentTools.WRITE_FILE, AgentTools.EDIT_FILE, AgentTools.MULTI_EDIT, AgentTools.UNDO_EDIT)) {
+                    val modified = mutableSetOf<String>()
+                    AgentTools.undoStacks.keys.forEach { modified.add(it) }
+                    modified.size
+                } else _sessionStats.value.filesModified
+            )
 
                         val obs = Prompts.observation(tc.function, tc.arguments, result.output, result.isError, result.exitCode)
                         chatHistory += ChatMessage(
@@ -598,6 +623,7 @@ class AgentEngine(
         chatHistory.clear()
         _chat.value = emptyList()
         _contextUsage.value = 0f
+        _sessionStats.value = SessionStats()
         say(ChatRole.SYSTEM, "聊天历史已清空")
     }
 

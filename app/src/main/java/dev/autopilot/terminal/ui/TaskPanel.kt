@@ -49,6 +49,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.lazy.itemsIndexed
+import dev.autopilot.terminal.agent.AgentEngine
 import dev.autopilot.terminal.agent.AgentUiState
 import dev.autopilot.terminal.agent.ChatEntry
 import dev.autopilot.terminal.agent.ChatRole
@@ -82,6 +83,7 @@ fun ChatPanel(vm: AutopilotViewModel, modifier: Modifier = Modifier) {
     val todos by vm.engine.todos.collectAsStateSafe()
     val streamingText by vm.engine.streamingText.collectAsStateSafe()
     val contextUsage by vm.engine.contextUsage.collectAsStateSafe()
+    val sessionStats by vm.engine.sessionStats.collectAsStateSafe()
     val listState = rememberLazyListState()
 
     LaunchedEffect(chat.size, streamingText.length) {
@@ -94,6 +96,10 @@ fun ChatPanel(vm: AutopilotViewModel, modifier: Modifier = Modifier) {
             WindowTitleBar(busy, state, onStop = { vm.engine.stop() })
 
             ContextUsageBar(contextUsage)
+
+            if (sessionStats.iterations > 0 || sessionStats.toolsCalled > 0) {
+                SessionStatsBar(sessionStats)
+            }
 
             FlowingGradientLine(Modifier.fillMaxWidth().height(2.dp))
 
@@ -215,6 +221,28 @@ private fun ContextUsageBar(usage: Float) {
         }
         Spacer(Modifier.width(6.dp))
         Text("${pct}%", color = color, fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun SessionStatsBar(stats: AgentEngine.SessionStats) {
+    Row(
+        Modifier.fillMaxWidth().background(WinSurface.copy(alpha = 0.3f)).padding(horizontal = 12.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        val items = listOf(
+            Triple("iter", stats.iterations.toString(), AccentGreen),
+            Triple("tok", if (stats.totalTokens >= 1000) "${stats.totalTokens / 1000}k" else stats.totalTokens.toString(), Cyan),
+            Triple("tool", stats.toolsCalled.toString(), AccentPurple),
+            Triple("file", stats.filesModified.toString(), Color(0xFFE8C76B)),
+            Triple("cmd", stats.commandsRun.toString(), Color(0xFFE876B0))
+        )
+        items.forEachIndexed { idx, (label, value, color) ->
+            if (idx > 0) { Spacer(Modifier.width(10.dp)); Text("|", color = TextDim.copy(alpha = 0.3f), fontSize = 9.sp, fontFamily = FontFamily.Monospace); Spacer(Modifier.width(10.dp)) }
+            Text(label, color = TextDim, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+            Spacer(Modifier.width(3.dp))
+            Text(value, color = color, fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+        }
     }
 }
 
