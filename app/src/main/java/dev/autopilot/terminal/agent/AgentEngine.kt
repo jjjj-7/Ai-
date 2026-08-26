@@ -757,10 +757,23 @@ class AgentEngine(
         if (estimatedTokens <= MAX_CONTEXT_CHARS / 4) return
 
         val head = messages.take(systemCount)
-        val tail = messages.takeLast(keep)
+
+        // Differentiated retention: keep user messages and assistant reasoning,
+        // truncate old tool results (they're less valuable over time)
+        val tail = messages.drop(systemCount).takeLast(keep * 2)
+        // Truncate old tool result contents to save tokens
+        val processedTail = tail.mapIndexed { idx, msg ->
+            val age = tail.size - idx
+            if (msg.role == "tool" && age > keep / 2) {
+                msg.copy(content = msg.content.take(200) + "\n[... old result truncated ...]")
+            } else {
+                msg
+            }
+        }
+
         messages.clear()
-        messages.addAll(head + tail)
-        say(ChatRole.SYSTEM, "上下文已裁剪 (保留最近 $keep 条)")
+        messages.addAll(head + processedTail)
+        say(ChatRole.SYSTEM, "上下文已裁剪 (保留最近 ${keep} 条, 工具结果按时效衰减)")
     }
 
     private suspend fun compactIfNeeded(messages: MutableList<ChatMessage>, systemCount: Int) {
@@ -771,18 +784,27 @@ class AgentEngine(
         val keepTail = WINDOW_KEEP / 2
         val middleEnd = messages.size - keepTail
         if (middleEnd - systemCount < 4) return
+
+        // Differentiated compression: preserve user messages fully,
+        // compress tool results more aggressively
         val middle = messages.subList(systemCount, middleEnd).toList()
 
         say(ChatRole.SYSTEM, "对话较长, 正在压缩历史上下文...")
         val req = listOf(
             ChatMessage(
                 "system",
-                "你是对话压缩器。把给出的多轮历史压缩为要点摘要: 保留关键事实、文件路径、命令执行结果、已做决定与未完成事项。600 字以内, 直接输出摘要正文。"
+                "你是对话压缩器。把给出的多轮历史压缩为要点摘要。重点保留: 用户原始需求和验收标准、关键文件路径、命令执行结果摘要、已做决定、未完成事项、错误诊断。压缩到 600 字以内, 直接输出摘要正文。"
             ),
             ChatMessage("user", middle.joinToString("\n\n") { m ->
-                val content = m.content.take(800)
+                val content = when (m.role) {
+                    "user" -> m.content.take(1000)  // Preserve user messages fully
+                    "tool" -> m.content.take(300)   // Compress tool results aggressively
+                    else -> m.content.take(600)     // Moderate for assistant
+                }
                 if (m.toolCalls.isNotEmpty()) {
-                    "[${m.role} tools: ${m.toolCalls.joinToString(", ") { "${it.function}(${it.arguments.take(100)})" }}] $content"
+                    "[${m.role} tools: ${m.toolCalls.joinToString(", ") {
+                        "${it.function}(${it.arguments.take(80)})"
+                    }}] $content"
                 } else {
                     "[${m.role}] $content"
                 }
@@ -797,7 +819,7 @@ class AgentEngine(
         rebuilt += messages.takeLast(keepTail)
         messages.clear()
         messages.addAll(rebuilt)
-        say(ChatRole.SYSTEM, "历史已压缩 (${middle.size} 条消息 → 摘要)")
+        say(ChatRole.SYSTEM, "历史已压缩 (${middle.size} 条 → 摘要, 用户消息全保留, 工具结果已压缩)")
     }
 
     private suspend fun awaitLlm(messages: List<ChatMessage>): Triple<String, List<ToolCall>, String?> {

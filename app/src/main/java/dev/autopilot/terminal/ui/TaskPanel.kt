@@ -279,13 +279,36 @@ private fun TerminalMessage(entry: ChatEntry, animate: Boolean) {
             }
         }
         ChatRole.OUTPUT -> SurfaceCard(accent = WinBorder) {
-            Text(
-                entry.text.take(1500),
-                color = Color(0xFFB5BDCA),
-                fontSize = 10.sp,
-                lineHeight = 15.sp,
-                fontFamily = FontFamily.Monospace
-            )
+            val text = entry.text.take(1500)
+            val hasDiff = entry.toolName == "edit_file" || entry.toolName == "write_file"
+            if (hasDiff) {
+                val lines = text.split("\n")
+                Column {
+                    lines.forEach { line ->
+                        val color = when {
+                            line.startsWith("+ ") || line.startsWith("++ ") || line.startsWith("+\t") -> Color(0xFF4EC9B0)
+                            line.startsWith("- ") || line.startsWith("-- ") || line.startsWith("-\t") -> Color(0xFFF44747)
+                            line.startsWith("--- diff") || line.startsWith("--- new file") -> Cyan
+                            else -> Color(0xFFB5BDCA)
+                        }
+                        Text(
+                            line,
+                            color = color,
+                            fontSize = 10.sp,
+                            lineHeight = 15.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+            } else {
+                Text(
+                    text,
+                    color = Color(0xFFB5BDCA),
+                    fontSize = 10.sp,
+                    lineHeight = 15.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
         }
         ChatRole.SYSTEM -> Row(Modifier.height(IntrinsicSize.Min)) {
             Box(
@@ -521,12 +544,39 @@ private fun GoalInput(vm: AutopilotViewModel, busy: Boolean) {
         if (focused) Cyan.copy(alpha = 0.65f) else WinBorder,
         animationSpec = tween(220)
     )
+    val history = remember { mutableListOf<String>() }
+    var historyIdx by remember { mutableStateOf(-1) }
 
     fun sendChat() {
         if (goal.isBlank() || busy) return
-        vm.engine.chat(goal.trim())
+        val msg = goal.trim()
+        if (msg.isNotBlank() && (history.isEmpty() || history.last() != msg)) {
+            history.add(msg)
+        }
+        historyIdx = -1
+        vm.engine.chat(msg)
         goal = ""
     }
+
+    fun navigateHistory(up: Boolean) {
+        if (history.isEmpty()) return
+        if (up) {
+            if (historyIdx < history.size - 1) {
+                historyIdx++
+                goal = history[history.size - 1 - historyIdx]
+            }
+        } else {
+            if (historyIdx > 0) {
+                historyIdx--
+                goal = history[history.size - 1 - historyIdx]
+            } else {
+                historyIdx = -1
+                goal = ""
+            }
+        }
+    }
+
+    val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
 
     Row(
         Modifier
@@ -549,7 +599,10 @@ private fun GoalInput(vm: AutopilotViewModel, busy: Boolean) {
             Spacer(Modifier.width(8.dp))
             BasicTextField(
                 value = goal,
-                onValueChange = { goal = it },
+                onValueChange = {
+                    goal = it
+                    historyIdx = -1
+                },
                 modifier = Modifier.weight(1f).padding(vertical = 9.dp),
                 textStyle = androidx.compose.ui.text.TextStyle(
                     fontSize = 13.sp,
@@ -560,17 +613,44 @@ private fun GoalInput(vm: AutopilotViewModel, busy: Boolean) {
                 cursorBrush = SolidColor(AccentGreen),
                 interactionSource = interaction,
                 maxLines = 3,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    imeAction = androidx.compose.ui.text.input.ImeAction.Send
+                ),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                    onSend = { sendChat(); keyboardController?.hide() }
+                ),
                 decorationBox = { inner ->
                     Box {
                         if (goal.isEmpty()) {
-                            Text("输入指令...", fontSize = 12.sp, color = Color(0xFF565F73))
+                            Text("输入指令... (↑↓ 历史回溯)", fontSize = 12.sp, color = Color(0xFF565F73))
                         }
                         inner()
                     }
                 }
             )
         }
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(4.dp))
+        Box(
+            Modifier
+                .size(28.dp)
+                .graphicsLayer { alpha = if (history.isNotEmpty()) 0.6f else 0.2f }
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(enabled = history.isNotEmpty()) { navigateHistory(true) },
+            contentAlignment = Alignment.Center
+        ) {
+            Text("↑", color = TextDim, fontSize = 14.sp, fontFamily = FontFamily.Monospace)
+        }
+        Box(
+            Modifier
+                .size(28.dp)
+                .graphicsLayer { alpha = if (historyIdx > 0) 0.6f else 0.2f }
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(enabled = historyIdx > 0) { navigateHistory(false) },
+            contentAlignment = Alignment.Center
+        ) {
+            Text("↓", color = TextDim, fontSize = 14.sp, fontFamily = FontFamily.Monospace)
+        }
+        Spacer(Modifier.width(4.dp))
 
         val canSend = goal.isNotBlank() && !busy
         Box(

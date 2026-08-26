@@ -429,9 +429,21 @@ object AgentTools {
                     ?: return ToolResult("Missing 'content' parameter", isError = true)
                 val file = resolvePath(path, workspaceRoot)
                 try {
+                    val isNew = !file.exists()
+                    val oldContent = if (file.exists()) file.readText() else ""
                     file.parentFile?.mkdirs()
                     file.writeText(content)
-                    ToolResult("Written ${content.length} bytes to ${file.absolutePath}")
+                    val sb = StringBuilder()
+                    if (isNew) {
+                        sb.append("Created ${file.absolutePath} (${content.length} bytes)\n\n")
+                        val lines = content.lines()
+                        sb.append("--- new file (${lines.size} lines) ---\n")
+                        lines.take(30).forEach { sb.append("+ $it\n") }
+                        if (lines.size > 30) sb.append("+ ... (${lines.size - 30} more lines)\n")
+                    } else {
+                        sb.append("Overwritten ${file.absolutePath} (${content.length} bytes, was ${oldContent.length} bytes)\n")
+                    }
+                    ToolResult(sb.toString())
                 } catch (e: Exception) {
                     ToolResult("Failed to write: ${e.message}", isError = true)
                 }
@@ -458,7 +470,21 @@ object AgentTools {
 
                 val newContent = content.substring(0, idx) + newStr + content.substring(idx + oldStr.length)
                 file.writeText(newContent)
-                ToolResult("Edited ${file.absolutePath}: replaced ${oldStr.length} chars with ${newStr.length} chars")
+
+                val sb = StringBuilder()
+                sb.append("Edited ${file.absolutePath}: replaced ${oldStr.length} chars with ${newStr.length} chars\n\n")
+                val lineNumBefore = content.take(idx).count { it == '\n' } + 1
+                sb.append("--- diff (around line $lineNumBefore) ---\n")
+                val oldLines = oldStr.lines()
+                val newLines = newStr.lines()
+                val maxLines = maxOf(oldLines.size, newLines.size)
+                for (i in 0 until maxLines) {
+                    val old = oldLines.getOrNull(i)
+                    val newL = newLines.getOrNull(i)
+                    if (old != null) sb.append("- $old\n")
+                    if (newL != null) sb.append("+ $newL\n")
+                }
+                ToolResult(sb.toString())
             }
 
             GLOB -> {
