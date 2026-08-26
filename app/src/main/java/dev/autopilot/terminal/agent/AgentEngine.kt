@@ -135,20 +135,14 @@ class AgentEngine(
             while (iteration < maxIterations) {
                 iteration++
                 db.taskDao().byId(taskId)?.let { db.taskDao().update(it.copy(iterations = iteration)) }
+                trimWindow(messages, systemCount = 2, keep = WINDOW_KEEP)
 
-                var fullText = ""
-                var llmError: String? = null
-                llm.chat(messages).collect { ev ->
-                    when (ev) {
-                        is LlmEvent.Completed -> fullText = ev.fullText
-                        is LlmEvent.Failed -> llmError = ev.error
-                        is LlmEvent.Delta -> Unit
-                    }
-                }
+                val (fullText0, llmError) = awaitLlm(messages)
                 if (llmError != null) {
                     failTask(taskId, "模型调用失败: $llmError")
                     return
                 }
+                val fullText = fullText0
 
                 val actionObj = parseAction(fullText)
                 if (actionObj == null) {
@@ -250,18 +244,12 @@ class AgentEngine(
                 var turns = 0
                 while (turns < CHAT_MAX_TURNS) {
                     turns++
+                    trimWindow(chatHistory, systemCount = 1, keep = CHAT_WINDOW_KEEP)
 
-                    var fullText = ""
-                    var llmError: String? = null
-                    llm.chat(chatHistory).collect { ev ->
-                        when (ev) {
-                            is LlmEvent.Completed -> fullText = ev.fullText
-                            is LlmEvent.Failed -> llmError = ev.error
-                            is LlmEvent.Delta -> Unit
-                        }
-                    }
+                    val (fullText, llmError) = awaitLlm(chatHistory)
                     if (llmError != null) {
                         say(ChatRole.SYSTEM, "模型调用失败: $llmError")
+                        _uiState.value = AgentUiState.Idle
                         return@launch
                     }
 
@@ -418,8 +406,35 @@ class AgentEngine(
     }
 
     companion object {
-        const val COMMAND_TIMEOUT_MS = 120_000L
+        const val COMMAND_TIMEOUT_MS = 45_000L
         const val CONFIRM_TIMEOUT_MS = 10 * 60_000L
         const val CHAT_MAX_TURNS = 15
+        const val LLM_TIMEOUT_MS = 90_000L
+        private const val WINDOW_KEEP = 12
+        private const val CHAT_WINDOW_KEEP = 14
+    }
+
+    private fun trimWindow(messages: MutableList<ChatMessage>, systemCount: Int, keep: Int) {
+        if (messages.size <= systemCount + keep) return
+        val head = messages.take(systemCount)
+        val tail = messages.takeLast(keep)
+        messages.clear()
+        messages.addAll(head + tail)
+    }
+
+    private suspend fun awaitLlm(messages: List<ChatMessage>): Pair<String, String?> {
+        val done = kotlinx.coroutines.withTimeoutOrNull(LLM_TIMEOUT_MS) {
+            var text = ""
+            var err: String? = null
+            llm.chat(messages).collect { ev ->
+                when (ev) {
+                    is LlmEvent.Completed -> text = ev.fullText
+                    is LlmEvent.Failed -> err = ev.error
+                    is LlmEvent.Delta -> Unit
+                }
+            }
+            Pair(text, err)
+        }
+        return done ?: Pair("", "模型响应超时 (${LLM_TIMEOUT_MS / 1000}s)，请检查网络或稍后重试")
     }
 }

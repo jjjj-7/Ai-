@@ -40,10 +40,10 @@ class TermuxChannel(
             val finished = CompletableDeferred<Int>()
             scope.launch {
                 while (!session.isRunning()) {
-                    delay(20)
+                    delay(10)
                 }
                 while (session.isRunning()) {
-                    delay(60)
+                    delay(25)
                 }
                 finished.complete(session.exitStatus)
             }
@@ -54,7 +54,7 @@ class TermuxChannel(
                 return ExecResult(null, digest(transcript(session)), true)
             }
 
-            delay(120)
+            delay(50)
             return ExecResult(code, digest(transcript(session)), false)
         } finally {
             if (activeSession === session) activeSession = null
