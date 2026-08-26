@@ -119,6 +119,36 @@ class AgentEngine(
         say(ChatRole.SYSTEM, text)
     }
 
+    fun exportChat(): String {
+        val sb = StringBuilder()
+        sb.appendLine("# Autopilot Chat Export")
+        sb.appendLine("# ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(java.util.Date())}")
+        sb.appendLine("# iterations=${_sessionStats.value.iterations} tokens=${_sessionStats.value.totalTokens} tools=${_sessionStats.value.toolsCalled}")
+        sb.appendLine()
+        for (entry in _chat.value) {
+            val tag = when (entry.role) {
+                ChatRole.USER -> "USER"
+                ChatRole.AI -> "AI"
+                ChatRole.CMD -> "CMD"
+                ChatRole.OUTPUT -> "OUT"
+                ChatRole.SYSTEM -> "SYS"
+                ChatRole.THINKING -> "THINK"
+                ChatRole.TOOL_CALL -> "TOOL"
+            }
+            if (entry.toolName != null) {
+                sb.appendLine("[$tag/${entry.toolName}]")
+            } else {
+                sb.appendLine("[$tag]")
+            }
+            sb.appendLine(entry.text)
+            sb.appendLine()
+        }
+        val exportFile = java.io.File(workspaceRootProvider(), "autopilot-export-${System.currentTimeMillis() / 1000}.md")
+        exportFile.writeText(sb.toString())
+        say(ChatRole.SYSTEM, "已导出到 ${exportFile.name}")
+        return exportFile.absolutePath
+    }
+
     fun submit(goal: String, criteria: List<String>, maxIterations: Int) {
         if (loopJob?.isActive == true) {
             say(ChatRole.SYSTEM, "有任务正在执行中，请先等待完成或点击停止")

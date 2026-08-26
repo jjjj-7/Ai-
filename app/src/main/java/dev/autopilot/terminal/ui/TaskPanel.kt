@@ -5,6 +5,8 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -60,6 +62,8 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import androidx.compose.animation.core.MutableTransitionState
@@ -80,6 +84,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.withStyle
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ChatPanel(vm: AutopilotViewModel, modifier: Modifier = Modifier) {
     val state by vm.engine.uiState.collectAsStateSafe()
@@ -146,8 +151,19 @@ fun ChatPanel(vm: AutopilotViewModel, modifier: Modifier = Modifier) {
                 if (chat.isEmpty() && streamingText.isEmpty()) item { WelcomeBlock() }
                 itemsIndexed(chat) { idx, entry ->
                     val isLast = idx == chat.lastIndex
+                    val clipboard = LocalClipboardManager.current
                     SlideFadeIn {
-                        TerminalMessage(entry, animate = isLast && entry.role == ChatRole.AI && !busy)
+                        Box(
+                            Modifier.combinedClickable(
+                                onClick = {},
+                                onLongClick = {
+                                    clipboard.setText(AnnotatedString(entry.text))
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                }
+                            )
+                        ) {
+                            TerminalMessage(entry, animate = isLast && entry.role == ChatRole.AI && !busy)
+                        }
                     }
                 }
                 if (streamingText.isNotBlank() && busy) {
@@ -790,6 +806,7 @@ private val SLASH_COMMANDS = listOf(
     SlashCommand("/clear", "清空聊天历史", "x"),
     SlashCommand("/status", "显示会话状态 (迭代/上下文)", "i"),
     SlashCommand("/undo", "撤销最后一次文件编辑", "undo"),
+    SlashCommand("/export", "导出聊天记录到文件", "exp"),
     SlashCommand("/stop", "停止当前任务", "[]"),
     SlashCommand("/model", "显示当前模型配置", "M")
 )
@@ -832,6 +849,10 @@ private fun handleSlashCommand(input: String, vm: AutopilotViewModel): Boolean {
             })
         }
         "/undo" -> vm.engine.undoLastEdit()
+        "/export" -> {
+            val path = vm.engine.exportChat()
+            vm.engine.injectSystem("聊天记录已导出到: $path")
+        }
         "/stop" -> vm.engine.stop("用户通过 /stop 命令停止")
         "/model" -> {
             val cfg = vm.config.value
