@@ -10,6 +10,7 @@ import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -19,6 +20,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -68,8 +72,9 @@ private fun InnerNavHost(vm: AutopilotViewModel) {
     }
 
     Scaffold(
+        containerColor = dev.autopilot.terminal.ui.WinBg,
         bottomBar = {
-            NavigationBar {
+            NavigationBar(containerColor = Color(0xFF0B0B15)) {
                 listOf(Dest.Terminal, Dest.Files, Dest.Settings).forEach { dest ->
                     NavigationBarItem(
                         selected = currentRoute == dest.route,
@@ -81,7 +86,14 @@ private fun InnerNavHost(vm: AutopilotViewModel) {
                             }
                         },
                         icon = dest.icon,
-                        label = { Text(dest.label) }
+                        label = { Text(dest.label, fontFamily = FontFamily.Monospace, fontSize = 11.sp) },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = AccentGreen,
+                            selectedTextColor = AccentGreen,
+                            indicatorColor = AccentGreen.copy(alpha = 0.13f),
+                            unselectedIconColor = Color(0xFF586074),
+                            unselectedTextColor = Color(0xFF586074)
+                        )
                     )
                 }
             }
