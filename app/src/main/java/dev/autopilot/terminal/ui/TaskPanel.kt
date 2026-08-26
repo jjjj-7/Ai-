@@ -19,8 +19,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
@@ -74,8 +72,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.withStyle
-import dev.autopilot.terminal.agent.SkillDef
-import dev.autopilot.terminal.agent.SkillsRegistry
 
 @Composable
 fun ChatPanel(vm: AutopilotViewModel, modifier: Modifier = Modifier) {
@@ -88,16 +84,6 @@ fun ChatPanel(vm: AutopilotViewModel, modifier: Modifier = Modifier) {
     LaunchedEffect(chat.size) {
         if (chat.isNotEmpty()) listState.animateScrollToItem(chat.size - 1)
     }
-
-    var userSkills by remember { mutableStateOf(emptyList<SkillDef>()) }
-    LaunchedEffect(busy, chat.size) {
-        if (!busy) {
-            userSkills = withContext(Dispatchers.IO) {
-                SkillsRegistry.loadUserSkills(vm.installer.homeDir)
-            }
-        }
-    }
-    val allSkills: List<SkillDef> = remember(userSkills) { SkillsRegistry.builtin + userSkills }
 
     Box(modifier.background(WinBg)) {
         NebulaBackdrop()
@@ -129,8 +115,6 @@ fun ChatPanel(vm: AutopilotViewModel, modifier: Modifier = Modifier) {
                 is AgentUiState.AwaitConfirm -> ConfirmDialog(s, vm)
                 else -> Unit
             }
-
-            SkillChips(allSkills, enabled = !busy) { vm.engine.chat(it) }
 
             GoalInput(vm, busy)
         }
@@ -212,7 +196,7 @@ private fun WelcomeBlock() {
         }
         Spacer(Modifier.height(6.dp))
         Text(
-            "AI 已接管此终端。下方输入指令，或点选技能快捷执行。",
+            "AI 已接管此终端。下方输入指令即可。",
             fontFamily = FontFamily.Monospace,
             fontSize = 11.sp,
             color = TextDim
@@ -412,37 +396,6 @@ private fun TypewriterText(full: String) {
         },
         color = TextMain, fontSize = 13.sp, lineHeight = 19.sp
     )
-}
-
-@Composable
-private fun SkillChips(skills: List<SkillDef>, enabled: Boolean, onRun: (String) -> Unit) {
-    LazyRow(
-        horizontalArrangement = Arrangement.spacedBy(7.dp),
-        contentPadding = PaddingValues(horizontal = 12.dp),
-        modifier = Modifier.padding(vertical = 6.dp)
-    ) {
-        itemsIndexed(skills) { idx, skill ->
-            ChipReveal(idx) {
-                val interaction = remember { MutableInteractionSource() }
-                val pressed by interaction.collectIsPressedAsState()
-                val scale by animateFloatAsState(if (pressed) 0.92f else 1f, tween(120))
-                val chipShape = RoundedCornerShape(20.dp)
-                Text(
-                    "◈ ${skill.label}",
-                    color = AccentGreen,
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier
-                        .graphicsLayer { scaleX = scale; scaleY = scale }
-                        .clip(chipShape)
-                        .background(if (pressed) WinBorder.copy(alpha = 0.35f) else WinSurface)
-                        .border(1.dp, AccentGreen.copy(alpha = if (enabled) 0.22f else 0.10f), chipShape)
-                        .clickable(interactionSource = interaction, indication = null, enabled = enabled) { onRun(skill.prompt) }
-                        .padding(horizontal = 13.dp, vertical = 7.dp)
-                )
-            }
-        }
-    }
 }
 
 @Composable

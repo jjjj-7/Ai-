@@ -90,12 +90,8 @@ class AgentEngine(
     @Volatile private var pendingConfirmCommand: String? = null
     private var loopJob: Job? = null
 
-    @Volatile var skillsProvider: () -> String = { "" }
-
     private fun systemMessage(base: String): ChatMessage {
         val extra = buildString {
-            val skills = runCatching { skillsProvider() }.getOrDefault("")
-            if (skills.isNotBlank()) append("\n\n").append(skills)
             val memory = runCatching { memoryProvider() }.getOrDefault("")
             if (memory.isNotBlank()) append("\n\n").append(memory)
         }

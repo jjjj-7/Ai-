@@ -38,9 +38,6 @@ class AutopilotViewModel(app: Application) : AndroidViewModel(app) {
     )
 
     init {
-        engine.skillsProvider = {
-            dev.autopilot.terminal.agent.SkillsRegistry.describe(installer.homeDir)
-        }
         engine.memoryProvider = {
             runCatching {
                 java.io.File(appCtx.workspaceRoot, "AUTOPILOT.md")
