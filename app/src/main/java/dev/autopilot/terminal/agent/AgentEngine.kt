@@ -55,6 +55,7 @@ internal data class AgentAction(
     val commands: List<String>? = null,
     val description: String? = null,
     val reason: String? = null,
+    val seconds: Long? = null,
     val steps: List<PlanStep>? = null,
     val summary: String? = null,
     val changed_files: List<String>? = null,
@@ -152,7 +153,7 @@ class AgentEngine(
             )
 
             var plan: Plan? = null
-            var planRetried = false
+            var formatRetried = false
             var iteration = 0
             var stepCounter = 0
             var lastFailCmd: String? = null
@@ -173,15 +174,19 @@ class AgentEngine(
 
                 val actionObj = parseAction(fullText)
                 if (actionObj == null) {
-                    if (!planRetried && plan == null) {
-                        planRetried = true
+                    if (!formatRetried) {
+                        formatRetried = true
                         messages += ChatMessage("assistant", fullText)
-                        messages += ChatMessage("user", "JSON 解析失败。请只输出一个符合格式的 JSON 对象。")
+                        messages += ChatMessage(
+                            "user",
+                            "你的上一条输出无法解析为动作。请只输出一个合法的 JSON 动作对象 (execute/batch/repair/todo/done), 不要附加任何说明文字或多余 JSON, 继续当前任务。"
+                        )
                         continue
                     }
                     failTask(taskId, "模型响应无法解析: ${fullText.take(200)}")
                     return
                 }
+                formatRetried = false
 
                 val action = actionObj!!
                 when (action.action) {
@@ -260,9 +265,34 @@ class AgentEngine(
                         stopTask(taskId, "AI 主动中止: ${action.reason ?: "未说明"}")
                         return
                     }
+                    "wait" -> {
+                        val sec = (action.seconds ?: 5L).coerceIn(1L, 60L)
+                        say(ChatRole.SYSTEM, "等待 ${sec}s...")
+                        delay(sec * 1000)
+                        messages += ChatMessage("assistant", fullText)
+                        messages += ChatMessage("user", "已等待 ${sec}秒。请查看后台任务状态 (joblog) 或继续下一步动作。")
+                    }
                     else -> {
-                        failTask(taskId, "未知动作类型: ${action.action}")
-                        return
+                        if (!formatRetried) {
+                            formatRetried = true
+                            messages += ChatMessage("assistant", fullText)
+                            messages += ChatMessage(
+                                "user",
+                                "动作 \"${action.action}\" 暂不支持。标准动作: plan/execute/batch/repair/todo/wait/done/abort。想执行 shell 就用 execute 或 batch, 然后继续任务。"
+                            )
+                        } else {
+                            formatRetried = false
+                            val fallbackCmd = action.command ?: action.summary
+                            if (!fallbackCmd.isNullOrBlank()) {
+                                messages += ChatMessage("user", "系统已把该意图转为 shell 执行: $fallbackCmd")
+                                val r = channel.exec(fallbackCmd, COMMAND_TIMEOUT_MS)
+                                db.auditDao().insert(AuditEntryEntity(taskId = taskId, channelLevel = channel.level, command = fallbackCmd, exitCode = r.exitCode))
+                                say(ChatRole.OUTPUT, "[exit=${r.exitCode ?: "超时"}] ${r.output.take(500)}")
+                                messages += Prompts.observation(stepCounter - 1, fallbackCmd, r.exitCode, r.output)
+                            } else {
+                                messages += ChatMessage("user", "请用标准动作 (execute/batch/done) 继续。")
+                            }
+                        }
                     }
                 }
             }
@@ -306,6 +336,16 @@ class AgentEngine(
 
                     val actionObj = parseAction(fullText)
                     if (actionObj == null) {
+                        val looksLikeBrokenJson =
+                            fullText.contains("\"action\"") || fullText.contains("{\"") || fullText.contains("```json")
+                        if (looksLikeBrokenJson) {
+                            chatHistory += ChatMessage("assistant", fullText)
+                            chatHistory += ChatMessage(
+                                "user",
+                                "你的输出包含不完整的动作 JSON。请只重新输出一个完整合法的 JSON 动作对象, 不附加任何说明文字, 继续执行。"
+                            )
+                            continue
+                        }
                         chatHistory += ChatMessage("assistant", fullText)
                         say(ChatRole.AI, fullText.trim().take(2000))
                         _uiState.value = AgentUiState.Idle
@@ -406,6 +446,13 @@ class AgentEngine(
                         val doneN = _todos.value.count { it.done }
                         say(ChatRole.AI, "任务清单更新: ${doneN}/${_todos.value.size} 已完成")
                     }
+                        "wait" -> {
+                            val sec = (actionObj.seconds ?: 5L).coerceIn(1L, 60L)
+                            say(ChatRole.SYSTEM, "等待 ${sec}s...")
+                            delay(sec * 1000)
+                            chatHistory += ChatMessage("assistant", fullText)
+                            chatHistory += ChatMessage("user", "已等待 ${sec}秒。请继续: 查看 joblog 或执行下一步。")
+                        }
                         "done" -> {
                             chatHistory += ChatMessage("assistant", fullText)
                             say(ChatRole.AI, actionObj.summary ?: "完成")
@@ -414,9 +461,23 @@ class AgentEngine(
                         }
                         else -> {
                             chatHistory += ChatMessage("assistant", fullText)
-                            say(ChatRole.AI, fullText.trim().take(2000))
+                            if (actionObj.command.isNullOrBlank()) {
+                                say(ChatRole.AI, fullText.trim().take(2000))
+                                _uiState.value = AgentUiState.Idle
+                                return@launch
+                            }
+                            val c = actionObj.command!!
+                            say(ChatRole.CMD, "\$ $c")
+                            val channel = channelProvider()
+                            if (channel == null) {
+                                say(ChatRole.SYSTEM, "终端环境未就绪，无法执行命令")
+                                return@launch
+                            }
+                            val r = channel.exec(c, COMMAND_TIMEOUT_MS)
+                            db.auditDao().insert(AuditEntryEntity(taskId = 0L, channelLevel = channel.level, command = c, exitCode = r.exitCode))
+                            say(ChatRole.OUTPUT, "[exit=${r.exitCode ?: "超时"}] ${r.output.take(600)}")
+                            chatHistory += Prompts.observation(turns, c, r.exitCode, r.output)
                             _uiState.value = AgentUiState.Idle
-                            return@launch
                         }
                     }
                 }
@@ -506,11 +567,35 @@ class AgentEngine(
     }
 
     private fun parseAction(text: String): AgentAction? {
-        val fenced = Regex("```(?:json)?\\s*([\\s\\S]*?)```").find(text)?.groupValues?.get(1)?.trim() ?: text
-        val start = fenced.indexOf('{')
-        val end = fenced.lastIndexOf('}')
-        if (start < 0 || end <= start) return null
-        return runCatching { json.decodeFromString<AgentAction>(fenced.substring(start, end + 1)) }.getOrNull()
+        val cleaned = Regex("```(?:json)?").replace(text, "").replace("```", "")
+        var depth = 0
+        var start = -1
+        var inStr = false
+        var esc = false
+        for (i in cleaned.indices) {
+            val ch = cleaned[i]
+            if (inStr) {
+                if (esc) esc = false
+                else if (ch == '\\') esc = true
+                else if (ch == '"') inStr = false
+                continue
+            }
+            when (ch) {
+                '"' -> inStr = true
+                '{' -> { if (depth == 0) start = i; depth++ }
+                '}' -> {
+                    depth--
+                    if (depth == 0 && start >= 0) {
+                        val cand = cleaned.substring(start, i + 1)
+                        val parsed = runCatching { json.decodeFromString<AgentAction>(cand) }.getOrNull()
+                        if (parsed != null && parsed.action.isNotBlank()) return parsed
+                        start = -1
+                    }
+                    if (depth < 0) depth = 0
+                }
+            }
+        }
+        return null
     }
 
     companion object {
