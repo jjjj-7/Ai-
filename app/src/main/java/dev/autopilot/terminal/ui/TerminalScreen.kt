@@ -64,9 +64,15 @@ fun TerminalScreen(vm: AutopilotViewModel) {
         }
 
         val active = sessions.firstOrNull { it.interactive && it.session.isRunning }
-        if (active == null) {
+        if (active != null) {
+            RealTerminalView(
+                state = active,
+                onSessionOutput = {},
+                modifier = Modifier.fillMaxWidth().weight(0.34f)
+            )
+        } else {
             vm.registry.pruneDead()
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Box(Modifier.weight(0.34f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
                         if (bootstrapState is BootstrapInstaller.InstallState.Ready)
@@ -83,15 +89,9 @@ fun TerminalScreen(vm: AutopilotViewModel) {
                     }
                 }
             }
-        } else {
-            RealTerminalView(
-                state = active,
-                onSessionOutput = {},
-                modifier = Modifier.weight(1f).fillMaxWidth()
-            )
         }
 
-        ChatPanel(vm)
+        ChatPanel(vm, Modifier.weight(0.66f).fillMaxWidth())
     }
 }
 
