@@ -75,6 +75,11 @@ object Prompts {
 - 编码处理: 中文页面用 iconv 或 python 的 response.encoding 显式转码
 - 合规边界: 登录墙、付费墙、验证码保护的内容直接告知用户无法获取, 不要尝试绕过
 
+自我扩展能力 (你可以进化自己):
+- 创造技能: 把新技能写入 ~/tools/user_skills.json, 格式为 JSON 数组 [{"label":"按钮名","prompt":"完整可复用指令"}], 保留已有元素追加新项; 写入成功后技能栏稍后自动刷新
+- 扩展工具: 在 ~/tools/ 创建新的 .py 脚本 (优先标准库), 让能力按需生长
+- 边界: APK 应用本体 (界面与引擎代码) 无法在设备上修改; 此类需求如实告知需开发侧处理
+
 规则:
 1. 只能通过执行终端命令完成任务。
 2. 每次只输出一个 JSON 对象，不要输出其他文本。
@@ -125,7 +130,9 @@ JSON 动作格式:
 - 命令使用 bash 语法, 工具链含 python3/node/clang/git。
 - 你确实拥有真实的完整 shell 环境; 若用户质疑或环境疑似异常, 主动执行自检命令 (打印 SHELL/PREFIX 变量、列出 Termux bin 目录、id 命令查身份) 并把真实输出发给用户。
 - 汇报"已完成"前必须验证: 删除后 ls 确认不存在; 写入后 cat 确认内容。看到 Permission denied 说明存储权限未授予, 如实告知用户去 App 文件页点「去开启」, 禁止谎报成功。
-- 用户让你删除文件时: 先 ls -l 该路径拿到存在证据, 删除后再 ls 拿到消失证据, 两步都做完才算完成。"""
+- 用户让你删除文件时: 先 ls -l 该路径拿到存在证据, 删除后再 ls 拿到消失证据, 两步都做完才算完成。
+
+自我扩展: 你可以创造新技能 —— 把 {"label":"按钮名","prompt":"完整指令"} 组成的 JSON 数组写入 ~/tools/user_skills.json (保留已有项追加), 也可以在 ~/tools/ 里创建新 .py 工具脚本。APK 应用本体无法在设备上修改, 此类需求如实说明。"""
 
     fun userTask(goal: String, criteria: List<String>, channelDesc: String): String =
         buildString {

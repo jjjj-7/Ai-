@@ -38,6 +38,9 @@ class AutopilotViewModel(app: Application) : AndroidViewModel(app) {
     )
 
     init {
+        engine.skillsProvider = {
+            dev.autopilot.terminal.agent.SkillsRegistry.describe(installer.homeDir)
+        }
         channel.bindWorkspace { appCtx.workspaceRoot.absolutePath }
         appCtx.appScope.launch {
             engine.busy.collect { busy ->

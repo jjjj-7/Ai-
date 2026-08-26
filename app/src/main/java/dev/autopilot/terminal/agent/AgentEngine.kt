@@ -77,6 +77,13 @@ class AgentEngine(
     @Volatile private var pendingConfirmCommand: String? = null
     private var loopJob: Job? = null
 
+    @Volatile var skillsProvider: () -> String = { "" }
+
+    private fun systemMessage(base: String): ChatMessage {
+        val skills = runCatching { skillsProvider() }.getOrDefault("")
+        return ChatMessage("system", if (skills.isBlank()) base else base + "\n\n" + skills)
+    }
+
     private fun say(role: ChatRole, text: String) {
         _chat.value = (_chat.value + ChatEntry(role, text)).takeLast(300)
     }
@@ -123,7 +130,7 @@ class AgentEngine(
         say(ChatRole.SYSTEM, "正在制定执行计划...")
 
             val messages = mutableListOf(
-                ChatMessage("system", Prompts.SYSTEM),
+                systemMessage(Prompts.SYSTEM),
                 ChatMessage("user", Prompts.userTask(goal, criteria, channelDescProvider()))
             )
 
@@ -237,7 +244,9 @@ class AgentEngine(
         loopJob = scope.launch {
             try {
                 if (chatHistory.isEmpty()) {
-                    chatHistory += ChatMessage("system", Prompts.SYSTEM_CHAT)
+                    chatHistory += systemMessage(Prompts.SYSTEM_CHAT)
+                } else if (chatHistory.first().role == "system") {
+                    chatHistory[0] = systemMessage(Prompts.SYSTEM_CHAT)
                 }
                 chatHistory += ChatMessage("user", message)
 

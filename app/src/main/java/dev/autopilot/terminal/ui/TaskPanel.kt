@@ -50,6 +50,10 @@ import dev.autopilot.terminal.agent.AgentUiState
 import dev.autopilot.terminal.agent.ChatEntry
 import dev.autopilot.terminal.agent.ChatRole
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import dev.autopilot.terminal.agent.SkillDef
+import dev.autopilot.terminal.agent.SkillsRegistry
 
 private val WinBg = Color(0xFF07070D)
 private val WinSurface = Color(0xFF10101C)
@@ -61,31 +65,6 @@ private val DotY = Color(0xFFFEBC2E)
 private val DotG = Color(0xFF28C840)
 private val Cyan = Color(0xFF22D3EE)
 
-private data class Skill(val label: String, val prompt: String)
-
-private val skills = listOf(
-    Skill(
-        "联网搜索",
-        "联网搜索今天的科技热点: 用 curl 带最新 Chrome 浏览器 UA 和 Accept-Language 头访问 Bing 搜索 (关键词自选, URL 编码), --compressed -L 抓回结果页 HTML 存到工作区, 再用 python3 正则提取每条结果的标题、来源和摘要, 给我整理成要点列表"
-    ),
-    Skill(
-        "抓取网页",
-        "我要抓一个网页的正文。先问我要 URL, 然后用 curl 带浏览器伪装头抓取 (处理 gzip 与重定向), 保存后用 python3 提出去掉脚本和样式的纯文本正文, 输出核心内容摘要"
-    ),
-    Skill(
-        "批量下载",
-        "帮我做批量下载: 先问我要文件链接清单 (或者给我一个列表页 URL 由你解析出下载链接), 然后写一个 python 脚本用 curl 逐个下载到 ~/storage/downloads, 每个间隔 1 秒, 校验文件大小, 最后汇报成功失败清单"
-    ),
-    Skill(
-        "站点监控",
-        "对几个常用网站做健康检查: 向我要域名列表 (没有就用 github.com / baidu.com / zhihu.com), 写脚本用 curl 测每个站点的 HTTP 状态码、DNS 解析时间和总响应耗时, 输出对比表格"
-    ),
-    Skill(
-        "设备体检",
-        "查看设备状态: uname -a 内核信息、df -h 磁盘占用、free 内存、uptime 运行时长, 汇总成简报"
-    )
-)
-
 @Composable
 fun ChatPanel(vm: AutopilotViewModel, modifier: Modifier = Modifier) {
     val state by vm.engine.uiState.collectAsStateSafe()
@@ -96,6 +75,16 @@ fun ChatPanel(vm: AutopilotViewModel, modifier: Modifier = Modifier) {
     LaunchedEffect(chat.size) {
         if (chat.isNotEmpty()) listState.animateScrollToItem(chat.size - 1)
     }
+
+    var userSkills by remember { mutableStateOf(emptyList<SkillDef>()) }
+    LaunchedEffect(busy, chat.size) {
+        if (!busy) {
+            userSkills = withContext(Dispatchers.IO) {
+                SkillsRegistry.loadUserSkills(vm.installer.homeDir)
+            }
+        }
+    }
+    val allSkills: List<SkillDef> = remember(userSkills) { SkillsRegistry.builtin + userSkills }
 
     Box(modifier.background(WinBg)) {
         Column(Modifier.fillMaxSize()) {
@@ -123,7 +112,7 @@ fun ChatPanel(vm: AutopilotViewModel, modifier: Modifier = Modifier) {
                 else -> Unit
             }
 
-            SkillChips(enabled = !busy) { vm.engine.chat(it) }
+            SkillChips(allSkills, enabled = !busy) { vm.engine.chat(it) }
 
             GoalInput(vm, busy)
         }
@@ -286,7 +275,7 @@ private fun TypewriterText(full: String) {
 }
 
 @Composable
-private fun SkillChips(enabled: Boolean, onRun: (String) -> Unit) {
+private fun SkillChips(skills: List<SkillDef>, enabled: Boolean, onRun: (String) -> Unit) {
     LazyRow(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         contentPadding = PaddingValues(horizontal = 12.dp),
