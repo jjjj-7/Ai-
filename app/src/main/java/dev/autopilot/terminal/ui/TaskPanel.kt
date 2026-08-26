@@ -219,10 +219,10 @@ private fun WelcomeBlock() {
         )
         Spacer(Modifier.height(12.dp))
         listOf(
-            Triple("●", AccentGreen, "14 个原生工具 — read/write/edit/grep/glob/subagent/listen"),
-            Triple("◆", AccentPurple, "并行执行 — batch 多命令同时跑, 倍速完成"),
-            Triple("▲", Cyan, "实时流式输出 — 看 AI 边想边做, 不再盲等"),
-            Triple("■", Color(0xFFE8C76B), "智能错误诊断 + diff 预览 + 自动 lint")
+            Triple("●", AccentGreen, "27 个原生工具 — 文件/Git/Web/测试/子Agent/网络诊断"),
+            Triple("◆", AccentPurple, "并行执行 + 流式输出 — 看 AI 边想边做"),
+            Triple("▲", Cyan, "diff 预览 + 自动 lint + 撤销 — 代码变更安全可控"),
+            Triple("■", Color(0xFFE8C76B), "Web 搜索 + URL 抓取 — Claude Code 没有的能力")
         ).forEach { (mark, markColor, line) ->
             Row(Modifier.padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(mark, color = markColor, fontSize = 9.sp)
@@ -360,30 +360,57 @@ private fun toolIcon(toolName: String?): String = when (toolName) {
     "read_file" -> "cat"
     "write_file" -> ">"
     "edit_file" -> "~"
+    "multi_edit" -> "~x"
+    "undo_edit" -> "undo"
     "glob" -> "*"
     "grep" -> "?"
+    "tree" -> "tree"
     "runbg" -> "bg"
     "joblog" -> "log"
     "wait" -> "..."
     "todo" -> "[ ]"
+    "web_search" -> "web"
+    "web_fetch" -> "get"
+    "dns_lookup" -> "dns"
+    "port_check" -> "port"
+    "git_status" -> "git"
+    "git_diff" -> "diff"
+    "git_commit" -> "commit"
+    "run_tests" -> "test"
+    "dispatch_subagent" -> "sub"
+    "listen" -> "ask"
     else -> ">"
 }
 
 private fun toolColor(toolName: String?): Color = when (toolName) {
     "execute", "batch" -> Cyan
     "read_file" -> Color(0xFF7EC8E3)
-    "write_file", "edit_file" -> AccentGreen
-    "glob", "grep" -> AccentPurple
+    "write_file", "edit_file", "multi_edit" -> AccentGreen
+    "undo_edit" -> Color(0xFFE8A070)
+    "glob", "grep", "tree" -> AccentPurple
     "runbg", "joblog" -> Color(0xFFE8C76B)
+    "web_search", "web_fetch" -> Color(0xFF7EE3C8)
+    "dns_lookup", "port_check" -> Color(0xFFC8B0E3)
+    "git_status", "git_diff", "git_commit" -> Color(0xFFE876B0)
+    "run_tests" -> Color(0xFFE8E37E)
+    "dispatch_subagent" -> Color(0xFFB0C8E3)
+    "listen" -> Color(0xFFE3B0C8)
     else -> Cyan
 }
 
 private fun toolAccent(toolName: String?): Color = when (toolName) {
     "execute", "batch" -> Cyan.copy(alpha = 0.35f)
     "read_file" -> Color(0xFF7EC8E3).copy(alpha = 0.30f)
-    "write_file", "edit_file" -> AccentGreen.copy(alpha = 0.35f)
-    "glob", "grep" -> AccentPurple.copy(alpha = 0.35f)
+    "write_file", "edit_file", "multi_edit" -> AccentGreen.copy(alpha = 0.35f)
+    "undo_edit" -> Color(0xFFE8A070).copy(alpha = 0.30f)
+    "glob", "grep", "tree" -> AccentPurple.copy(alpha = 0.35f)
     "runbg", "joblog" -> Color(0xFFE8C76B).copy(alpha = 0.30f)
+    "web_search", "web_fetch" -> Color(0xFF7EE3C8).copy(alpha = 0.30f)
+    "dns_lookup", "port_check" -> Color(0xFFC8B0E3).copy(alpha = 0.30f)
+    "git_status", "git_diff", "git_commit" -> Color(0xFFE876B0).copy(alpha = 0.30f)
+    "run_tests" -> Color(0xFFE8E37E).copy(alpha = 0.30f)
+    "dispatch_subagent" -> Color(0xFFB0C8E3).copy(alpha = 0.30f)
+    "listen" -> Color(0xFFE3B0C8).copy(alpha = 0.30f)
     else -> WinBorder
 }
 

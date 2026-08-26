@@ -39,6 +39,17 @@ object AgentTools {
     const val JOBLOG = "joblog"
     const val SUBAGENT = "dispatch_subagent"
     const val LISTEN = "listen"
+    const val WEB_SEARCH = "web_search"
+    const val WEB_FETCH = "web_fetch"
+    const val UNDO_EDIT = "undo_edit"
+    const val MULTI_EDIT = "multi_edit"
+    const val GIT_STATUS = "git_status"
+    const val GIT_DIFF = "git_diff"
+    const val GIT_COMMIT = "git_commit"
+    const val RUN_TESTS = "run_tests"
+    const val DNS_LOOKUP = "dns_lookup"
+    const val PORT_CHECK = "port_check"
+    const val TREE = "tree"
 
     fun schemas(): List<ToolDefinition> = listOf(
         ToolDefinition(
@@ -338,6 +349,187 @@ object AgentTools {
                     })
                 }
             )
+        ),
+        ToolDefinition(
+            function = ToolFunction(
+                name = WEB_SEARCH,
+                description = "Search the web for information. Returns titles, URLs, and snippets from search results. Use for finding documentation, looking up error messages, discovering APIs, or researching solutions. Claude Code does NOT have this — this is a unique capability.",
+                parameters = buildJsonObject {
+                    put("type", "object")
+                    putJsonArray("required") { add(JsonPrimitive("query")) }
+                    put("properties", buildJsonObject {
+                        put("query", buildJsonObject {
+                            put("type", "string")
+                            put("description", "Search query text")
+                        })
+                        put("count", buildJsonObject {
+                            put("type", "integer")
+                            put("description", "Number of results (1-10). Default: 5")
+                        })
+                    })
+                }
+            )
+        ),
+        ToolDefinition(
+            function = ToolFunction(
+                name = WEB_FETCH,
+                description = "Fetch content from a URL. Converts HTML to clean text or markdown. Use for reading documentation pages, downloading code, checking API responses. Supports content extraction and length limiting.",
+                parameters = buildJsonObject {
+                    put("type", "object")
+                    putJsonArray("required") { add(JsonPrimitive("url")) }
+                    put("properties", buildJsonObject {
+                        put("url", buildJsonObject {
+                            put("type", "string")
+                            put("description", "URL to fetch (http or https)")
+                        })
+                        put("max_length", buildJsonObject {
+                            put("type", "integer")
+                            put("description", "Maximum content length in chars. Default: 5000")
+                        })
+                    })
+                }
+            )
+        ),
+        ToolDefinition(
+            function = ToolFunction(
+                name = UNDO_EDIT,
+                description = "Undo the last file edit or write operation. Restores the previous content. Use when you realize a change was wrong. Maintains a stack of changes per file.",
+                parameters = buildJsonObject {
+                    put("type", "object")
+                    putJsonArray("required") { add(JsonPrimitive("path")) }
+                    put("properties", buildJsonObject {
+                        put("path", buildJsonObject {
+                            put("type", "string")
+                            put("description", "Path of the file to undo last change on")
+                        })
+                    })
+                }
+            )
+        ),
+        ToolDefinition(
+            function = ToolFunction(
+                name = MULTI_EDIT,
+                description = "Apply multiple edits to a single file in one operation. Each edit has old_string and new_string. Edits are applied sequentially. Use when you need to make several changes to the same file — much more efficient than multiple edit_file calls.",
+                parameters = buildJsonObject {
+                    put("type", "object")
+                    putJsonArray("required") { add(JsonPrimitive("path")); add(JsonPrimitive("edits")) }
+                    put("properties", buildJsonObject {
+                        put("path", buildJsonObject {
+                            put("type", "string")
+                            put("description", "File path to edit")
+                        })
+                        put("edits", buildJsonObject {
+                            put("type", "array")
+                            put("description", "Array of edits to apply sequentially")
+                            put("items", buildJsonObject {
+                                put("type", "object")
+                                put("properties", buildJsonObject {
+                                    put("old_string", buildJsonObject { put("type", "string") })
+                                    put("new_string", buildJsonObject { put("type", "string") })
+                                })
+                                putJsonArray("required") { add(JsonPrimitive("old_string")); add(JsonPrimitive("new_string")) }
+                            })
+                        })
+                    })
+                }
+            )
+        ),
+        ToolDefinition(
+            function = ToolFunction(
+                name = GIT_STATUS,
+                description = "Show git working tree status. Returns staged, unstaged, and untracked file changes. Use before committing or to understand what changed.",
+                parameters = buildJsonObject {
+                    put("type", "object")
+                    put("properties", buildJsonObject {
+                        put("path", buildJsonObject {
+                            put("type", "string")
+                            put("description", "Git repo directory. Default: workspace root"
+                        )})
+                    })
+                }
+            )
+        ),
+        ToolDefinition(
+            function = ToolFunction(
+                name = GIT_DIFF,
+                description = "Show git diff of unstaged changes. Returns line-by-line diff output. Use to review changes before committing.",
+                parameters = buildJsonObject {
+                    put("type", "object")
+                    put("properties", buildJsonObject {
+                        put("path", buildJsonObject { put("type", "string"); put("description", "Git repo directory") })
+                        put("staged", buildJsonObject { put("type", "boolean"); put("description", "Show staged changes (--cached). Default: false") })
+                        put("file", buildJsonObject { put("type", "string"); put("description", "Specific file to diff") })
+                    })
+                }
+            )
+        ),
+        ToolDefinition(
+            function = ToolFunction(
+                name = GIT_COMMIT,
+                description = "Stage files and commit to git. Automatically stages the specified files, creates a commit with the given message, and returns the result. Does NOT push.",
+                parameters = buildJsonObject {
+                    put("type", "object")
+                    putJsonArray("required") { add(JsonPrimitive("message")) }
+                    put("properties", buildJsonObject {
+                        put("message", buildJsonObject { put("type", "string"); put("description", "Commit message") })
+                        put("files", buildJsonObject { put("type", "array"); put("items", buildJsonObject { put("type", "string") }); put("description", "Files to stage. Default: all changes (git add -A)") })
+                    })
+                }
+            )
+        ),
+        ToolDefinition(
+            function = ToolFunction(
+                name = RUN_TESTS,
+                description = "Detect and run the project's test suite. Automatically identifies the test framework (JUnit, pytest, jest, go test, cargo test) and runs the appropriate command. Returns test results summary.",
+                parameters = buildJsonObject {
+                    put("type", "object")
+                    put("properties", buildJsonObject {
+                        put("path", buildJsonObject { put("type", "string"); put("description", "Project directory. Default: workspace root") })
+                        put("filter", buildJsonObject { put("type", "string"); put("description", "Test name filter pattern (optional)") })
+                    })
+                }
+            )
+        ),
+        ToolDefinition(
+            function = ToolFunction(
+                name = DNS_LOOKUP,
+                description = "Resolve a hostname to its IP addresses. Useful for network debugging and verifying connectivity.",
+                parameters = buildJsonObject {
+                    put("type", "object")
+                    putJsonArray("required") { add(JsonPrimitive("hostname")) }
+                    put("properties", buildJsonObject {
+                        put("hostname", buildJsonObject { put("type", "string"); put("description", "Hostname to resolve") })
+                    })
+                }
+            )
+        ),
+        ToolDefinition(
+            function = ToolFunction(
+                name = PORT_CHECK,
+                description = "Check if a TCP port is open on a host. Returns open/closed status and latency. Useful for service health checks.",
+                parameters = buildJsonObject {
+                    put("type", "object")
+                    putJsonArray("required") { add(JsonPrimitive("host")); add(JsonPrimitive("port")) }
+                    put("properties", buildJsonObject {
+                        put("host", buildJsonObject { put("type", "string"); put("description", "Hostname or IP") })
+                        put("port", buildJsonObject { put("type", "integer"); put("description", "Port number") })
+                        put("timeout_ms", buildJsonObject { put("type", "integer"); put("description", "Connection timeout. Default: 3000") })
+                    })
+                }
+            )
+        ),
+        ToolDefinition(
+            function = ToolFunction(
+                name = TREE,
+                description = "Display directory tree structure. Shows files and subdirectories in a visual tree format. Useful for understanding project layout. Excludes common ignore dirs (.git, node_modules, build).",
+                parameters = buildJsonObject {
+                    put("type", "object")
+                    put("properties", buildJsonObject {
+                        put("path", buildJsonObject { put("type", "string"); put("description", "Directory path. Default: workspace root") })
+                        put("max_depth", buildJsonObject { put("type", "integer"); put("description", "Maximum depth. Default: 3") })
+                    })
+                }
+            )
         )
     )
 
@@ -431,6 +623,9 @@ object AgentTools {
                 try {
                     val isNew = !file.exists()
                     val oldContent = if (file.exists()) file.readText() else ""
+                    if (!isNew) {
+                        undoStacks.getOrPut(file.absolutePath) { mutableListOf() }.add(oldContent)
+                    }
                     file.parentFile?.mkdirs()
                     file.writeText(content)
                     val sb = StringBuilder()
@@ -470,6 +665,7 @@ object AgentTools {
                 if (secondIdx >= 0) return ToolResult("old_string is not unique (found at positions $idx and $secondIdx). Provide more surrounding context.", isError = true)
 
                 val newContent = content.substring(0, idx) + newStr + content.substring(idx + oldStr.length)
+                undoStacks.getOrPut(file.absolutePath) { mutableListOf() }.add(content)
                 file.writeText(newContent)
 
                 val sb = StringBuilder()
@@ -577,6 +773,194 @@ object AgentTools {
                 ToolResult("__DELEGATED__")
             }
 
+            WEB_SEARCH -> {
+                val query = args["query"]?.jsonPrimitive?.content
+                    ?: return ToolResult("Missing 'query' parameter", isError = true)
+                val count = args["count"]?.jsonPrimitive?.content?.toIntOrNull() ?: 5
+                if (channel == null) return ToolResult("Terminal not ready", isError = true)
+                val searchCmd = "python3 -c \"\n" +
+                    "import urllib.request, urllib.parse, json\n" +
+                    "q = ${'$'}{'$'}query${'$'}\n" +
+                    "url = 'https://html.duckduckgo.com/html/?q=' + urllib.parse.quote(q)\n" +
+                    "req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})\n" +
+                    "try:\n" +
+                    "    html = urllib.request.urlopen(req, timeout=10).read().decode('utf-8', errors='ignore')\n" +
+                    "    import re\n" +
+                    "    results = re.findall(r'result__a\"[^>]*>(.*?)</a>.*?result__snippet.*?>(.*?)</a>', html, re.DOTALL)\n" +
+                    "    for i, (t, s) in enumerate(results[:${count}]):\n" +
+                    "        t = re.sub('<[^>]+>', '', t).strip()\n" +
+                    "        s = re.sub('<[^>]+>', '', s).strip()\n" +
+                    "        print(f'{i+1}. {t}')\n" +
+                    "        print(f'   {s[:200]}')\n" +
+                    "        print()\n" +
+                    "except Exception as e:\n" +
+                    "    print(f'Error: {e}')\n" +
+                    "\" 2>&1"
+                val r = channel.exec(searchCmd.replace("\${'$'}{\"\$\"}query\${'$'}", "\"$query\""), 15_000)
+                if (r.output.isBlank()) ToolResult("No results found", isError = true)
+                else ToolResult(r.output.take(3000))
+            }
+
+            WEB_FETCH -> {
+                val url = args["url"]?.jsonPrimitive?.content
+                    ?: return ToolResult("Missing 'url' parameter", isError = true)
+                val maxLen = args["max_length"]?.jsonPrimitive?.content?.toIntOrNull() ?: 5000
+                if (channel == null) return ToolResult("Terminal not ready", isError = true)
+                val fetchCmd = "python3 -c \"\n" +
+                    "import urllib.request, re, sys\n" +
+                    "url = sys.argv[1]\n" +
+                    "req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})\n" +
+                    "html = urllib.request.urlopen(req, timeout=15).read().decode('utf-8', errors='ignore')\n" +
+                    "html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL)\n" +
+                    "html = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL)\n" +
+                    "text = re.sub(r'<[^>]+>', ' ', html)\n" +
+                    "text = re.sub(r'\\s+', ' ', text).strip()\n" +
+                    "print(text[:${maxLen}])\n" +
+                    "\" \"$url\" 2>&1"
+                val r = channel.exec(fetchCmd, 20_000)
+                if (r.output.isBlank()) ToolResult("Failed to fetch $url", isError = true)
+                else ToolResult(r.output.take(maxLen))
+            }
+
+            UNDO_EDIT -> {
+                val path = args["path"]?.jsonPrimitive?.content
+                    ?: return ToolResult("Missing 'path' parameter", isError = true)
+                val file = resolvePath(path, workspaceRoot)
+                val stack = undoStacks.getOrPut(file.absolutePath) { mutableListOf() }
+                if (stack.isEmpty()) return ToolResult("No undo history for ${file.absolutePath}", isError = true)
+                val prevContent = stack.removeLast()
+                if (!file.exists()) {
+                    return ToolResult("File no longer exists: ${file.absolutePath}", isError = true)
+                }
+                val currentContent = runCatching { file.readText() }.getOrNull()
+                file.writeText(prevContent)
+                // Re-add current to redo stack
+                if (currentContent != null) {
+                    redoStacks.getOrPut(file.absolutePath) { mutableListOf() }.add(currentContent)
+                }
+                ToolResult("Undone: restored ${file.absolutePath} to previous state (${prevContent.length} bytes)")
+            }
+
+            MULTI_EDIT -> {
+                val path = args["path"]?.jsonPrimitive?.content
+                    ?: return ToolResult("Missing 'path' parameter", isError = true)
+                val editsArr = args["edits"]?.jsonArray
+                    ?: return ToolResult("Missing 'edits' parameter", isError = true)
+                val file = resolvePath(path, workspaceRoot)
+                if (!file.exists()) return ToolResult("File not found: ${file.absolutePath}", isError = true)
+                if (!file.canRead() || !file.canWrite()) return ToolResult("Permission denied", isError = true)
+
+                val content = runCatching { file.readText() }.getOrElse {
+                    return ToolResult("Failed to read: ${it.message}", isError = true)
+                }
+                // Backup for undo
+                undoStacks.getOrPut(file.absolutePath) { mutableListOf() }.add(content)
+
+                var newContent = content
+                val sb = StringBuilder()
+                sb.append("Multi-edit ${file.absolutePath} (${editsArr.size} edits):\n\n")
+                for ((editIdx, editEl) in editsArr.withIndex()) {
+                    val edit = editEl.jsonObject
+                    val oldStr = edit["old_string"]?.jsonPrimitive?.content
+                        ?: return ToolResult("Edit $editIdx missing old_string", isError = true)
+                    val newStr = edit["new_string"]?.jsonPrimitive?.content
+                        ?: return ToolResult("Edit $editIdx missing new_string", isError = true)
+                    val idx = newContent.indexOf(oldStr)
+                    if (idx < 0) {
+                        sb.append("Edit ${editIdx+1}: old_string NOT FOUND — skipped\n")
+                        continue
+                    }
+                    newContent = newContent.substring(0, idx) + newStr + newContent.substring(idx + oldStr.length)
+                    sb.append("Edit ${editIdx+1}: replaced ${oldStr.length}→${newStr.length} chars\n")
+                }
+                file.writeText(newContent)
+                sb.append("\nDone. File updated successfully.")
+                ToolResult(sb.toString())
+            }
+
+            GIT_STATUS -> {
+                if (channel == null) return ToolResult("Terminal not ready", isError = true)
+                val repoPath = args["path"]?.jsonPrimitive?.content ?: workspaceRoot.absolutePath
+                val r = channel.exec("cd $repoPath && git status --short 2>&1", 10_000)
+                val sb = StringBuilder()
+                sb.append("Git status ($repoPath):\n")
+                sb.append(r.output.take(2000))
+                ToolResult(sb.toString(), isError = r.exitCode != 0 && r.exitCode != null)
+            }
+
+            GIT_DIFF -> {
+                if (channel == null) return ToolResult("Terminal not ready", isError = true)
+                val repoPath = args["path"]?.jsonPrimitive?.content ?: workspaceRoot.absolutePath
+                val staged = args["staged"]?.jsonPrimitive?.content == "true"
+                val file = args["file"]?.jsonPrimitive?.content
+                val cmd = "cd $repoPath && git diff ${if (staged) "--cached " else ""}${file ?: ""} 2>&1"
+                val r = channel.exec(cmd, 15_000)
+                ToolResult(r.output.take(4000), isError = r.exitCode != 0 && r.exitCode != null)
+            }
+
+            GIT_COMMIT -> {
+                if (channel == null) return ToolResult("Terminal not ready", isError = true)
+                val msg = args["message"]?.jsonPrimitive?.content
+                    ?: return ToolResult("Missing 'message' parameter", isError = true)
+                val files = args["files"]?.jsonArray?.map { it.jsonPrimitive.content }
+                val addCmd = if (files.isNullOrEmpty()) "git add -A" else files.joinToString(" ") { "git add \"$it\"" }
+                val cmd = "cd ${workspaceRoot.absolutePath} && $addCmd && git commit -m \"${msg.replace("\"", "\\\"")}\" 2>&1"
+                val r = channel.exec(cmd, 15_000)
+                ToolResult(r.output.take(2000), isError = r.exitCode != null && r.exitCode != 0)
+            }
+
+            RUN_TESTS -> {
+                if (channel == null) return ToolResult("Terminal not ready", isError = true)
+                val projectPath = args["path"]?.jsonPrimitive?.content ?: workspaceRoot.absolutePath
+                val filter = args["filter"]?.jsonPrimitive?.content
+                val testCmd = detectTestCommand(File(projectPath), filter)
+                if (testCmd == null) return ToolResult("No test framework detected in $projectPath", isError = true)
+                val r = channel.exec("cd $projectPath && $testCmd 2>&1", 120_000)
+                val sb = StringBuilder()
+                sb.append("Test command: $testCmd\n")
+                sb.append("[exit=${r.exitCode ?: "timeout"}]\n")
+                sb.append(r.output.take(3000))
+                ToolResult(sb.toString(), isError = r.exitCode != null && r.exitCode != 0)
+            }
+
+            DNS_LOOKUP -> {
+                val hostname = args["hostname"]?.jsonPrimitive?.content
+                    ?: return ToolResult("Missing 'hostname' parameter", isError = true)
+                val addrs = runCatching {
+                    java.net.InetAddress.getAllByName(hostname).map { it.hostAddress }
+                }.getOrElse {
+                    return ToolResult("DNS lookup failed: ${it.message}", isError = true)
+                }
+                ToolResult("DNS for $hostname:\n${addrs.joinToString("\n") { "  $it" }}")
+            }
+
+            PORT_CHECK -> {
+                val host = args["host"]?.jsonPrimitive?.content
+                    ?: return ToolResult("Missing 'host' parameter", isError = true)
+                val port = args["port"]?.jsonPrimitive?.content?.toIntOrNull()
+                    ?: return ToolResult("Missing 'port' parameter", isError = true)
+                val timeoutMs = args["timeout_ms"]?.jsonPrimitive?.content?.toIntOrNull() ?: 3000
+                val startMs = System.currentTimeMillis()
+                val isOpen = runCatching {
+                    val socket = java.net.Socket()
+                    socket.connect(java.net.InetSocketAddress(host, port), timeoutMs)
+                    socket.isConnected
+                }.getOrDefault(false)
+                val latency = System.currentTimeMillis() - startMs
+                ToolResult("${host}:${port} ${if (isOpen) "OPEN" else "CLOSED"} (${latency}ms)")
+            }
+
+            TREE -> {
+                val basePath = args["path"]?.jsonPrimitive?.content ?: workspaceRoot.absolutePath
+                val maxDepth = args["max_depth"]?.jsonPrimitive?.content?.toIntOrNull() ?: 3
+                val baseFile = File(basePath).let { if (it.isAbsolute) it else File(workspaceRoot, basePath) }
+                if (!baseFile.exists()) return ToolResult("Directory not found: ${baseFile.absolutePath}", isError = true)
+                val sb = StringBuilder()
+                sb.append("${baseFile.absolutePath}\n")
+                printTree(baseFile, sb, "", maxDepth, 0)
+                ToolResult(sb.toString())
+            }
+
             else -> ToolResult("Unknown tool: $toolName", isError = true)
         }
     }
@@ -650,6 +1034,55 @@ object AgentTools {
                         results.add("$relPath:${lineNum + 1}: ${line.take(200)}")
                     }
                 }
+            }
+        }
+    }
+
+    private val undoStacks = mutableMapOf<String, MutableList<String>>()
+    private val redoStacks = mutableMapOf<String, MutableList<String>>()
+
+    private fun detectTestCommand(projectDir: File, filter: String?): String? {
+        val f = filter?.let { " -k \"$it\"" } ?: ""
+        return when {
+            File(projectDir, "build.gradle.kts").exists() || File(projectDir, "build.gradle").exists() ->
+                "./gradlew test$f 2>&1 | tail -40"
+            File(projectDir, "package.json").exists() -> {
+                val pkg = runCatching {
+                    Json { ignoreUnknownKeys = true }
+                        .parseToJsonElement(File(projectDir, "package.json").readText())
+                        .let { it as? JsonObject }
+                }.getOrNull()
+                val scripts = pkg?.get("scripts") as? JsonObject
+                when {
+                    scripts?.get("test") != null -> "npm test$f 2>&1 | tail -40"
+                    else -> "npx jest$f 2>&1 | tail -40"
+                }
+            }
+            File(projectDir, "go.mod").exists() -> "go test$f ./... 2>&1 | tail -40"
+            File(projectDir, "Cargo.toml").exists() -> "cargo test$f 2>&1 | tail -40"
+            File(projectDir, "pytest.ini").exists() || File(projectDir, "pyproject.toml").exists() ->
+                "python3 -m pytest$f 2>&1 | tail -40"
+            File(projectDir, "setup.py").exists() -> "python3 -m pytest$f 2>&1 | tail -40"
+            File(projectDir, "pom.xml").exists() -> "mvn test$f 2>&1 | tail -40"
+            else -> null
+        }
+    }
+
+    private val treeIgnoreDirs = setOf(".git", "node_modules", "build", "__pycache__", ".gradle", "dist", "target", ".idea", ".vscode")
+
+    private fun printTree(dir: File, sb: StringBuilder, prefix: String, maxDepth: Int, depth: Int) {
+        if (depth >= maxDepth) return
+        val files = dir.listFiles()?.sortedBy { it.name } ?: return
+        val visible = files.filter { it.name !in treeIgnoreDirs && !it.name.startsWith(".") }
+        for ((i, file) in visible.withIndex()) {
+            val isLast = i == visible.size - 1
+            val connector = if (isLast) "└── " else "├── "
+            sb.append("$prefix$connector${file.name}")
+            if (file.isDirectory) sb.append("/")
+            sb.append("\n")
+            if (file.isDirectory) {
+                val newPrefix = prefix + if (isLast) "    " else "│   "
+                printTree(file, sb, newPrefix, maxDepth, depth + 1)
             }
         }
     }
