@@ -37,6 +37,12 @@ fun TerminalScreen(vm: AutopilotViewModel) {
     val sessions by vm.registry.sessions.collectAsStateSafe()
     val openAt by vm.openTerminalAt.collectAsStateSafe()
 
+    LaunchedEffect(bootstrapState) {
+        if (bootstrapState is BootstrapInstaller.InstallState.Idle) {
+            vm.retryBootstrap()
+        }
+    }
+
     LaunchedEffect(openAt) {
         val dir = openAt ?: return@LaunchedEffect
         val ready = bootstrapState is BootstrapInstaller.InstallState.Ready

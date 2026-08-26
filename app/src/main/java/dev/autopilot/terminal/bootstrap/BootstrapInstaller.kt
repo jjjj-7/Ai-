@@ -28,17 +28,25 @@ class BootstrapInstaller private constructor(private val appContext: Context) {
     suspend fun ensureInstalled() = withContext(Dispatchers.IO) {
         if (_state.value is InstallState.Ready) return@withContext
         _state.value = InstallState.Installing
+        android.util.Log.i(TAG, "bootstrap install start, prefix=${prefix.absolutePath}")
         try {
-            if (isReady()) {
-                setupStorageLinks()
-                _state.value = InstallState.Ready
-                return@withContext
+            val result = kotlinx.coroutines.withTimeoutOrNull(INSTALL_TIMEOUT_MS) {
+                if (isReady()) {
+                    setupStorageLinks()
+                    "ready"
+                } else {
+                    installFromAssets()
+                    setupStorageLinks()
+                    if (isReady()) "ready" else null
+                }
             }
-            installFromAssets()
-            setupStorageLinks()
-            _state.value = if (isReady()) InstallState.Ready
-            else InstallState.Failed("bootstrap 解压完成但 bash 缺失")
+            _state.value = when (result) {
+                "ready" -> InstallState.Ready.also { android.util.Log.i(TAG, "bootstrap ready") }
+                null -> InstallState.Failed("环境安装超时(${INSTALL_TIMEOUT_MS / 1000}s)，点重试再试一次")
+                else -> InstallState.Failed("bootstrap 解压完成但 bash 缺失")
+            }
         } catch (t: Throwable) {
+            android.util.Log.e(TAG, "bootstrap install failed", t)
             _state.value = InstallState.Failed(t.message ?: t.javaClass.simpleName)
         }
     }
@@ -139,6 +147,8 @@ class BootstrapInstaller private constructor(private val appContext: Context) {
     }
 
     companion object {
+        private const val TAG = "BootstrapInstall"
+        private const val INSTALL_TIMEOUT_MS = 150_000L
         @Volatile private var instance: BootstrapInstaller? = null
 
         fun get(app: Context): BootstrapInstaller =

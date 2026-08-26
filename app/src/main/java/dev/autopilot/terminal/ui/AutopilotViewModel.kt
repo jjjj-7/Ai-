@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.autopilot.terminal.bootstrap.BootstrapInstaller
+import dev.autopilot.terminal.TaskGuardService
 import dev.autopilot.terminal.data.EncryptedConfigStore
 import dev.autopilot.terminal.data.ModelConfig
 import dev.autopilot.terminal.agent.AgentEngine
@@ -17,15 +18,17 @@ import java.io.File
 
 class AutopilotViewModel(app: Application) : AndroidViewModel(app) {
 
+    private val appCtx = app as dev.autopilot.terminal.AutopilotApp
+
     val configStore = EncryptedConfigStore(app)
     val installer = BootstrapInstaller.get(app)
-    val registry = SessionRegistry(installer, (app as dev.autopilot.terminal.AutopilotApp).workspaceRoot)
-    val channel = TermuxChannel(registry, viewModelScope)
+    val registry = SessionRegistry(installer, appCtx.workspaceRoot)
+    val channel = TermuxChannel(registry, appCtx.appScope)
     val llm = LlmClient(configProvider = { configStore.load() })
     val db = dev.autopilot.terminal.data.AppDatabase.get(app)
 
     val engine = AgentEngine(
-        scope = viewModelScope,
+        scope = appCtx.appScope,
         llm = llm,
         db = db,
         channelProvider = { channel.takeIf { installer.isReady() } },
@@ -33,6 +36,20 @@ class AutopilotViewModel(app: Application) : AndroidViewModel(app) {
             if (installer.isReady()) "Termux 用户态 / 完整工具链" else "环境安装中"
         }
     )
+
+    init {
+        channel.bindWorkspace { appCtx.workspaceRoot.absolutePath }
+        appCtx.appScope.launch {
+            engine.busy.collect { busy ->
+                if (busy) TaskGuardService.start(app)
+                else TaskGuardService.stop(app)
+            }
+        }
+        viewModelScope.launch {
+            runCatching { ensureBootstrap() }
+                .onFailure { android.util.Log.e(TAG, "bootstrap failed", it) }
+        }
+    }
 
     private val _riskAccepted = MutableStateFlow(false)
     val riskAccepted: StateFlow<Boolean> = _riskAccepted
