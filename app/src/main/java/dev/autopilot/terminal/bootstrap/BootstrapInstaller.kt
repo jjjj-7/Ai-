@@ -67,7 +67,7 @@ class BootstrapInstaller private constructor(private val appContext: Context) {
                 }
             }
             appContext.assets.list("cmds")?.forEach { name ->
-                val dest = File(binDir, name.removeSuffix(".sh"))
+                val dest = File(binDir, name.removeSuffix(".sh").removeSuffix(".py"))
                 appContext.assets.open("cmds/$name").use { input ->
                     dest.outputStream().use { output -> input.copyTo(output) }
                 }

@@ -56,7 +56,13 @@ class AutopilotViewModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch {
             runCatching { ensureBootstrap() }
-                .onSuccess { if (installer.isReady()) preinstallPythonDeps() }
+                .onSuccess {
+                    if (installer.isReady()) {
+                        installer.installTools()
+                        preinstallPythonDeps()
+                    }
+                    exportCliConfig(configStore.load())
+                }
                 .onFailure { android.util.Log.e(TAG, "bootstrap failed", it) }
         }
     }
@@ -82,6 +88,22 @@ class AutopilotViewModel(app: Application) : AndroidViewModel(app) {
     fun saveConfig(cfg: ModelConfig) {
         configStore.save(cfg)
         _config.value = cfg
+        exportCliConfig(cfg)
+    }
+
+    private fun exportCliConfig(cfg: ModelConfig) {
+        if (!cfg.isComplete()) return
+        runCatching {
+            val payload = dev.autopilot.terminal.data.CliConfig(
+                baseUrl = cfg.baseUrl, apiKey = cfg.apiKey,
+                model = cfg.model, temperature = cfg.temperature
+            )
+            File(installer.homeDir, ".ai_config.json").writeText(
+                kotlinx.serialization.json.Json.encodeToString(
+                    dev.autopilot.terminal.data.CliConfig.serializer(), payload
+                )
+            )
+        }
     }
 
     fun retryBootstrap() {

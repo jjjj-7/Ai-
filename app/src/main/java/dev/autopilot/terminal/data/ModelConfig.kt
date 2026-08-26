@@ -20,6 +20,14 @@ data class ModelConfig(
     fun masked(): ModelConfig = copy(apiKey = if (apiKey.isBlank()) "" else "sk-***")
 }
 
+@Serializable
+data class CliConfig(
+    val baseUrl: String,
+    val apiKey: String,
+    val model: String,
+    val temperature: Double
+)
+
 interface ConfigStore {
     fun load(): ModelConfig
     fun save(config: ModelConfig)
