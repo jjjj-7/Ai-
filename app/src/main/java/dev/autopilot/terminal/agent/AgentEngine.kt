@@ -282,16 +282,7 @@ class AgentEngine(
                             )
                         } else {
                             formatRetried = false
-                            val fallbackCmd = action.command ?: action.summary
-                            if (!fallbackCmd.isNullOrBlank()) {
-                                messages += ChatMessage("user", "系统已把该意图转为 shell 执行: $fallbackCmd")
-                                val r = channel.exec(fallbackCmd, COMMAND_TIMEOUT_MS)
-                                db.auditDao().insert(AuditEntryEntity(taskId = taskId, channelLevel = channel.level, command = fallbackCmd, exitCode = r.exitCode))
-                                say(ChatRole.OUTPUT, "[exit=${r.exitCode ?: "超时"}] ${r.output.take(500)}")
-                                messages += Prompts.observation(stepCounter - 1, fallbackCmd, r.exitCode, r.output)
-                            } else {
-                                messages += ChatMessage("user", "请用标准动作 (execute/batch/done) 继续。")
-                            }
+                            messages += ChatMessage("user", "请用标准动作 (execute/batch/done) 继续, 不要自创动作名。")
                         }
                     }
                 }
@@ -461,23 +452,11 @@ class AgentEngine(
                         }
                         else -> {
                             chatHistory += ChatMessage("assistant", fullText)
-                            if (actionObj.command.isNullOrBlank()) {
-                                say(ChatRole.AI, fullText.trim().take(2000))
-                                _uiState.value = AgentUiState.Idle
-                                return@launch
-                            }
-                            val c = actionObj.command!!
-                            say(ChatRole.CMD, "\$ $c")
-                            val channel = channelProvider()
-                            if (channel == null) {
-                                say(ChatRole.SYSTEM, "终端环境未就绪，无法执行命令")
-                                return@launch
-                            }
-                            val r = channel.exec(c, COMMAND_TIMEOUT_MS)
-                            db.auditDao().insert(AuditEntryEntity(taskId = 0L, channelLevel = channel.level, command = c, exitCode = r.exitCode))
-                            say(ChatRole.OUTPUT, "[exit=${r.exitCode ?: "超时"}] ${r.output.take(600)}")
-                            chatHistory += Prompts.observation(turns, c, r.exitCode, r.output)
-                            _uiState.value = AgentUiState.Idle
+                            chatHistory += ChatMessage(
+                                "user",
+                                "动作 \"${actionObj.action}\" 暂不支持。标准动作: execute/batch/todo/wait/done。想执行命令就输出 execute 或 batch JSON, 不要用其他动作名。"
+                            )
+                            continue
                         }
                     }
                 }
