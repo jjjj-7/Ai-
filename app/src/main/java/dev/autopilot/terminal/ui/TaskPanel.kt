@@ -301,7 +301,33 @@ private fun TerminalMessage(entry: ChatEntry, animate: Boolean) {
                 color = AccentAmber.copy(alpha = 0.90f), fontSize = 12.sp, lineHeight = 17.sp
             )
         }
-        ChatRole.THINKING, ChatRole.TOOL_CALL -> Unit
+        ChatRole.THINKING -> Row(Modifier.height(IntrinsicSize.Min)) {
+            Box(
+                Modifier
+                    .width(2.5.dp)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(AccentPurple.copy(alpha = 0.5f))
+            )
+            Spacer(Modifier.width(10.dp))
+            Column {
+                Text(
+                    "thinking",
+                    color = AccentPurple.copy(alpha = 0.6f),
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(bottom = 2.dp)
+                )
+                Text(
+                    entry.text.take(2000),
+                    color = Color(0xFF7A82A0),
+                    fontSize = 12.sp,
+                    lineHeight = 18.sp,
+                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
+                )
+            }
+        }
+        ChatRole.TOOL_CALL -> Unit
     }
 }
 
@@ -350,13 +376,13 @@ private fun StreamingMessage(text: String) {
                 .width(2.5.dp)
                 .fillMaxHeight()
                 .clip(RoundedCornerShape(2.dp))
-                .background(Brush.verticalGradient(listOf(AccentGreen, Cyan)))
+                .background(Brush.verticalGradient(listOf(AccentPurple, Cyan)))
         )
         Spacer(Modifier.width(10.dp))
         Column {
             Text(
                 "thinking",
-                color = TextDim,
+                color = AccentPurple.copy(alpha = 0.6f),
                 fontSize = 9.sp,
                 fontFamily = FontFamily.Monospace,
                 modifier = Modifier.padding(bottom = 2.dp)
@@ -366,7 +392,7 @@ private fun StreamingMessage(text: String) {
                     append(text.take(3000))
                     withStyle(SpanStyle(color = Cyan.copy(alpha = cursorAlpha))) { append("▌") }
                 },
-                color = TextMain,
+                color = Color(0xFF8B94B0),
                 fontSize = 13.sp,
                 lineHeight = 19.sp
             )

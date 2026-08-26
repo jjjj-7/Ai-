@@ -37,6 +37,8 @@ object AgentTools {
     const val ABORT = "abort"
     const val RUNBG = "runbg"
     const val JOBLOG = "joblog"
+    const val SUBAGENT = "dispatch_subagent"
+    const val LISTEN = "listen"
 
     fun schemas(): List<ToolDefinition> = listOf(
         ToolDefinition(
@@ -300,6 +302,42 @@ object AgentTools {
                     })
                 }
             )
+        ),
+        ToolDefinition(
+            function = ToolFunction(
+                name = SUBAGENT,
+                description = "Dispatch a sub-agent to handle a complex subtask independently. The sub-agent gets its own context window, tool access, and execution loop. It returns a summary of what it accomplished. Use this for: researching a large codebase, implementing a self-contained feature, running a test suite with analysis, or any task that would pollute the main context with excessive tool output. Multiple sub-agents can be dispatched in parallel.",
+                parameters = buildJsonObject {
+                    put("type", "object")
+                    putJsonArray("required") { add(JsonPrimitive("goal")) }
+                    put("properties", buildJsonObject {
+                        put("goal", buildJsonObject {
+                            put("type", "string")
+                            put("description", "Clear, self-contained goal for the sub-agent. Include all context needed — the sub-agent starts fresh with no knowledge of the main conversation.")
+                        })
+                        put("max_iterations", buildJsonObject {
+                            put("type", "integer")
+                            put("description", "Maximum iterations for the sub-agent. Default: 15")
+                        })
+                    })
+                }
+            )
+        ),
+        ToolDefinition(
+            function = ToolFunction(
+                name = LISTEN,
+                description = "Send a message directly to the user and wait for their response. Use when you need user input, confirmation, or clarification mid-task.",
+                parameters = buildJsonObject {
+                    put("type", "object")
+                    putJsonArray("required") { add(JsonPrimitive("message")) }
+                    put("properties", buildJsonObject {
+                        put("message", buildJsonObject {
+                            put("type", "string")
+                            put("description", "Message or question to present to the user")
+                        })
+                    })
+                }
+            )
         )
     )
 
@@ -505,6 +543,10 @@ object AgentTools {
                 if (channel == null) return ToolResult("Terminal not ready", isError = true)
                 val r = channel.exec("joblog $name", 5000)
                 ToolResult(r.output.take(2000))
+            }
+
+            SUBAGENT, LISTEN -> {
+                ToolResult("__DELEGATED__")
             }
 
             else -> ToolResult("Unknown tool: $toolName", isError = true)

@@ -175,7 +175,8 @@ class AgentEngine(
             )
 
             if (fullText.isNotBlank() && fullText.length > 10) {
-                say(ChatRole.AI, fullText.trim().take(3000))
+                val role = if (toolCalls.isNotEmpty()) ChatRole.THINKING else ChatRole.AI
+                say(role, fullText.trim().take(3000))
             }
 
             if (toolCalls.isEmpty()) {
@@ -262,22 +263,54 @@ class AgentEngine(
             messages += ChatMessage("tool", "Todo updated.", toolCallId = firstTodo.id, name = AgentTools.TODO)
         }
 
-        val actionCalls = toolCalls.filter { it.function !in listOf(AgentTools.TODO, AgentTools.FINISH, AgentTools.ABORT) }
-        if (actionCalls.size > 1) {
-            say(ChatRole.SYSTEM, "并行执行 ${actionCalls.size} 个工具...")
+        val actionCalls = toolCalls.filter {
+            it.function !in listOf(AgentTools.TODO, AgentTools.FINISH, AgentTools.ABORT,
+                AgentTools.SUBAGENT, AgentTools.LISTEN)
+        }
+        val subAgentCalls = toolCalls.filter { it.function == AgentTools.SUBAGENT }
+        val listenCalls = toolCalls.filter { it.function == AgentTools.LISTEN }
+
+        if (actionCalls.size + subAgentCalls.size + listenCalls.size > 1) {
+            say(ChatRole.SYSTEM, "并行执行 ${actionCalls.size + subAgentCalls.size + listenCalls.size} 个工具...")
         }
 
-        val results: List<Pair<ToolCall, AgentTools.ToolResult>> = coroutineScope {
-            actionCalls.map { tc ->
-                async {
-                    val result = AgentTools.execute(
-                        tc.function, tc.arguments, channel,
-                        workspaceRootProvider(), COMMAND_TIMEOUT_MS
-                    )
-                    Pair<ToolCall, AgentTools.ToolResult>(tc, result)
-                }
-            }.awaitAll()
+        if (subAgentCalls.isNotEmpty()) {
+            for (tc in subAgentCalls) {
+                stepCounter++
+                setStepCounter(stepCounter)
+                val goal = extractFromArgsSingle(tc.arguments, "goal") ?: ""
+                val maxIter = extractFromArgsSingle(tc.arguments, "max_iterations")?.toIntOrNull() ?: 15
+                say(ChatRole.CMD, "subagent: ${goal.take(80)}", toolName = tc.function)
+                _uiState.value = AgentUiState.Executing(taskId, stepCounter - 1, _todos.value.size.coerceAtLeast(stepCounter), goal.take(60), iteration, tc.function)
+                val subResult = runSubAgent(goal, maxIter, channel)
+                say(ChatRole.OUTPUT, subResult.take(1000), toolName = tc.function)
+                messages += ChatMessage("tool", subResult, toolCallId = tc.id, name = tc.function)
+            }
         }
+
+        if (listenCalls.isNotEmpty()) {
+            for (tc in listenCalls) {
+                val msg = extractFromArgsSingle(tc.arguments, "message") ?: ""
+                say(ChatRole.AI, msg)
+                val userResponse = waitForUserInput()
+                say(ChatRole.USER, userResponse)
+                messages += ChatMessage("tool", "User response: $userResponse", toolCallId = tc.id, name = tc.function)
+            }
+        }
+
+        val results: List<Pair<ToolCall, AgentTools.ToolResult>> = if (actionCalls.isNotEmpty()) {
+            coroutineScope {
+                actionCalls.map { tc ->
+                    async {
+                        val result = AgentTools.execute(
+                            tc.function, tc.arguments, channel,
+                            workspaceRootProvider(), COMMAND_TIMEOUT_MS
+                        )
+                        Pair<ToolCall, AgentTools.ToolResult>(tc, result)
+                    }
+                }.awaitAll()
+            }
+        } else emptyList()
 
         for ((tc, result) in results) {
             stepCounter++
@@ -445,7 +478,8 @@ class AgentEngine(
                     )
 
                     if (fullText.isNotBlank() && fullText.length > 10) {
-                        say(ChatRole.AI, fullText.trim().take(2000))
+                        val role = if (toolCalls.isNotEmpty()) ChatRole.THINKING else ChatRole.AI
+                        say(role, fullText.trim().take(2000))
                     }
 
                     if (toolCalls.isEmpty()) {
@@ -565,6 +599,7 @@ class AgentEngine(
     }
 
     private val confirmChannel = kotlinx.coroutines.channels.Channel<Boolean>(capacity = 1)
+    private val inputChannel = kotlinx.coroutines.channels.Channel<String>(capacity = 1)
 
     fun confirm() {
         pendingConfirmCommand = null
@@ -574,6 +609,73 @@ class AgentEngine(
     fun reject() {
         pendingConfirmCommand = null
         confirmChannel.trySend(false)
+    }
+
+    fun provideUserInput(text: String) {
+        inputChannel.trySend(text)
+    }
+
+    private suspend fun waitForUserInput(): String {
+        val response = kotlinx.coroutines.withTimeoutOrNull(5 * 60_000L) { inputChannel.receive() }
+        return response ?: "(no response)"
+    }
+
+    private suspend fun runSubAgent(goal: String, maxIter: Int, channel: CommandChannel): String {
+        val subMessages = mutableListOf(
+            systemMessage(Prompts.SYSTEM),
+            ChatMessage("user", "Subtask: $goal\n\nYou are a sub-agent. Complete this task autonomously and call finish with a summary of what you accomplished.")
+        )
+        var iteration = 0
+        while (iteration < maxIter) {
+            iteration++
+            compactIfNeeded(subMessages, systemCount = 2)
+            trimWindow(subMessages, systemCount = 2, keep = SUB_WINDOW_KEEP)
+
+            _uiState.value = AgentUiState.Streaming(-1L, iteration)
+            val (fullText, toolCalls, llmError) = awaitLlm(subMessages)
+            _streamingText.value = ""
+
+            if (llmError != null) return "Sub-agent failed: $llmError"
+
+            subMessages += ChatMessage("assistant", fullText, toolCalls = toolCalls)
+
+            if (toolCalls.isEmpty()) {
+                if (fullText.isNotBlank()) {
+                    subMessages += ChatMessage("user", "Use tools to complete the task, or call finish.")
+                    continue
+                }
+                continue
+            }
+
+            val finishCall = toolCalls.firstOrNull { it.function == AgentTools.FINISH }
+            if (finishCall != null) {
+                return extractFromArgsSingle(finishCall.arguments, "summary") ?: "Sub-agent completed."
+            }
+            val abortCall = toolCalls.firstOrNull { it.function == AgentTools.ABORT }
+            if (abortCall != null) {
+                return "Sub-agent aborted: ${extractFromArgsSingle(abortCall.arguments, "reason") ?: "unknown"}"
+            }
+
+            val actionCalls = toolCalls.filter {
+                it.function !in listOf(AgentTools.TODO, AgentTools.FINISH, AgentTools.ABORT,
+                    AgentTools.SUBAGENT, AgentTools.LISTEN)
+            }
+            for (tc in actionCalls) {
+                val result = AgentTools.execute(
+                    tc.function, tc.arguments, channel,
+                    workspaceRootProvider(), COMMAND_TIMEOUT_MS
+                )
+                subMessages += ChatMessage(
+                    "tool",
+                    Prompts.observation(tc.function, tc.arguments, result.output, result.isError, result.exitCode).content,
+                    toolCallId = tc.id,
+                    name = tc.function
+                )
+                if (result.output == "__FINISH__") return "Sub-agent completed."
+                if (result.output == "__ABORT__") return "Sub-agent aborted."
+            }
+        }
+        return "Sub-agent reached iteration limit ($maxIter)."
     }
 
     fun stop(reason: String = "用户手动停止") {
@@ -633,6 +735,7 @@ class AgentEngine(
         const val MAX_TOKENS = 8192
         const val WINDOW_KEEP = 40
         const val CHAT_WINDOW_KEEP = 30
+        const val SUB_WINDOW_KEEP = 20
         const val COMPACT_THRESHOLD = 60
         const val MAX_CONTEXT_CHARS = 80_000
     }
