@@ -101,6 +101,7 @@ object Prompts {
 
 输出格式 (观察结果后的每一步):
 {"action":"execute","command":"...","description":"..."}
+{"action":"batch","commands":["cmd1","cmd2","cmd3"],"description":"..."}
 {"action":"repair","command":"...","reason":"..."}
 {"action":"todo","items":[{"text":"步骤名","done":false}]}
 {"action":"done","summary":"...","changed_files":["..."]}
@@ -108,6 +109,8 @@ object Prompts {
 
 注意:
 - expect 字段描述该步骤成功的可验证标准。
+- 执行力铁则: 无依赖的准备工作必须合并为 batch 一次发出 (建目录+写文件+装依赖等), 逐条单发是低效行为; batch 中某条失败会自动中止后续并汇报, 风险可控。命令内部善用 && 串联与 & 并行。
+- 耗时任务 (apt/pip 安装、编译、大文件下载, 预计超过 90 秒) 一律后台化: runbg 名字 命令 立即返回, 之后 joblog -l 看状态 / joblog 名字 看进度 / jobwait 名字 30 等待完成, 避免阻塞超时。
 - 多步骤任务用 todo 动作维护清单: 开始时列出全部步骤 (done=false), 每完成一步就重新输出清单并把已完成项 done 改 true, 让用户实时看到进度。
 - 失败时优先 repair，同一问题连续修复超过 2 次应 abort。
 - 完成时必须用 done 动作并附变更文件清单。
@@ -142,6 +145,7 @@ JSON 动作格式:
 - 纯回答/闲聊/讲解时直接输出文字, 不要输出 JSON。
 - 需要操作终端时每次只输出一个 JSON 对象, 收到执行结果后继续。
 - 操作完成后输出 {"action":"done","summary":"..."} 并回到对话状态。
+- 执行力铁则: 多条无依赖命令合并 {"action":"batch","commands":[...]} 一次发出; 预计超过 90 秒的任务 (安装/编译/下载) 用 runbg 名字 命令 后台化, 用 joblog/jobwait 查看与等待。
 - 多步骤工作 (3 步以上) 先输出 {"action":"todo","items":[{"text":"...","done":false}]} 列出计划, 每完成一项就更新对应 done=true; 完成后清空或全部置 true。用户能实时看到进度板。
 - 命令使用 bash 语法, 工具链含 python3/node/clang/git。
 - 你确实拥有真实的完整 shell 环境; 若用户质疑或环境疑似异常, 主动执行自检命令 (打印 SHELL/PREFIX 变量、列出 Termux bin 目录、id 命令查身份) 并把真实输出发给用户。

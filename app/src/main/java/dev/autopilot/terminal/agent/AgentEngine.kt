@@ -12,6 +12,7 @@ import dev.autopilot.terminal.perms.CommandChannel
 import dev.autopilot.terminal.perms.CommandRunner
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -51,6 +52,7 @@ internal data class ActionTodoItem(val text: String, val done: Boolean = false)
 internal data class AgentAction(
     val action: String,
     val command: String? = null,
+    val commands: List<String>? = null,
     val description: String? = null,
     val reason: String? = null,
     val steps: List<PlanStep>? = null,
@@ -360,12 +362,50 @@ class AgentEngine(
                             }
                             _uiState.value = AgentUiState.Idle
                         }
-                        "todo" -> {
+                    "batch" -> {
+                        val cmds = actionObj.commands?.filter { it.isNotBlank() } ?: emptyList()
+                        if (cmds.isEmpty()) {
                             chatHistory += ChatMessage("assistant", fullText)
-                            _todos.value = (actionObj.items ?: emptyList()).map { TodoItem(it.text, it.done) }
-                            val doneN = _todos.value.count { it.done }
-                            say(ChatRole.AI, "任务清单更新: ${doneN}/${_todos.value.size} 已完成")
+                            say(ChatRole.AI, fullText.trim().take(2000))
+                            _uiState.value = AgentUiState.Idle
+                            return@launch
                         }
+                        chatHistory += ChatMessage("assistant", fullText)
+                        say(ChatRole.CMD, cmds.joinToString("\n") { "\$ $it" })
+                        val channel = channelProvider()
+                        if (channel == null) {
+                            say(ChatRole.SYSTEM, "终端环境未就绪，无法执行命令")
+                            return@launch
+                        }
+                        var combined = ""
+                        var lastExit: Int? = 0
+                        for ((i, c) in cmds.withIndex()) {
+                            val verdict = RiskFilter.evaluate(c)
+                            if (verdict is RiskFilter.Verdict.Confirm) {
+                                pendingConfirmCommand = c
+                                db.auditDao().insert(AuditEntryEntity(taskId = 0L, channelLevel = channel.level, command = c, exitCode = null))
+                                _uiState.value = AgentUiState.AwaitConfirm(0L, c, verdict.reason)
+                                awaitConfirmDecision()
+                                pendingConfirmCommand = null
+                                if (_uiState.value is AgentUiState.Stopped || _uiState.value is AgentUiState.Failed) return@launch
+                            }
+                            _uiState.value = AgentUiState.Executing(0L, i, cmds.size, c, turns)
+                            val r = channel.exec(c, COMMAND_TIMEOUT_MS)
+                            db.auditDao().insert(AuditEntryEntity(taskId = 0L, channelLevel = channel.level, command = c, exitCode = r.exitCode))
+                            lastExit = r.exitCode
+                            combined += "[${i + 1}/${cmds.size} exit=${r.exitCode ?: "超时"}] \$ ${c.take(80)}\n${r.output.take(400)}\n"
+                            if (r.exitCode != null && r.exitCode != 0) break
+                        }
+                        say(ChatRole.OUTPUT, combined.take(1400))
+                        chatHistory += Prompts.observation(turns, actionObj.description ?: "batch", lastExit, combined.take(3200))
+                        _uiState.value = AgentUiState.Idle
+                    }
+                    "todo" -> {
+                        chatHistory += ChatMessage("assistant", fullText)
+                        _todos.value = (actionObj.items ?: emptyList()).map { TodoItem(it.text, it.done) }
+                        val doneN = _todos.value.count { it.done }
+                        say(ChatRole.AI, "任务清单更新: ${doneN}/${_todos.value.size} 已完成")
+                    }
                         "done" -> {
                             chatHistory += ChatMessage("assistant", fullText)
                             say(ChatRole.AI, actionObj.summary ?: "完成")
@@ -474,10 +514,10 @@ class AgentEngine(
     }
 
     companion object {
-        const val COMMAND_TIMEOUT_MS = 45_000L
+        const val COMMAND_TIMEOUT_MS = 120_000L
         const val CONFIRM_TIMEOUT_MS = 10 * 60_000L
         const val CHAT_MAX_TURNS = 15
-        const val LLM_TIMEOUT_MS = 90_000L
+        const val LLM_TIMEOUT_MS = 120_000L
         private const val WINDOW_KEEP = 12
         private const val CHAT_WINDOW_KEEP = 14
         private const val COMPACT_THRESHOLD = 22
@@ -518,18 +558,27 @@ class AgentEngine(
     }
 
     private suspend fun awaitLlm(messages: List<ChatMessage>): Pair<String, String?> {
-        val done = kotlinx.coroutines.withTimeoutOrNull(LLM_TIMEOUT_MS) {
-            var text = ""
-            var err: String? = null
-            llm.chat(messages).collect { ev ->
-                when (ev) {
-                    is LlmEvent.Completed -> text = ev.fullText
-                    is LlmEvent.Failed -> err = ev.error
-                    is LlmEvent.Delta -> Unit
+        var last: Pair<String, String?> = Pair("", "未知错误")
+        repeat(2) { attempt ->
+            val done = kotlinx.coroutines.withTimeoutOrNull(LLM_TIMEOUT_MS) {
+                var text = ""
+                var err: String? = null
+                llm.chat(messages).collect { ev ->
+                    when (ev) {
+                        is LlmEvent.Completed -> text = ev.fullText
+                        is LlmEvent.Failed -> err = ev.error
+                        is LlmEvent.Delta -> Unit
+                    }
                 }
+                Pair(text, err)
             }
-            Pair(text, err)
+            last = done ?: Pair("", "模型响应超时 (${LLM_TIMEOUT_MS / 1000}s)")
+            if (last.second == null) return last
+            if (attempt == 0) {
+                say(ChatRole.SYSTEM, "模型响应异常 (${last.second?.take(60)}), 自动重试...")
+                delay(600)
+            }
         }
-        return done ?: Pair("", "模型响应超时 (${LLM_TIMEOUT_MS / 1000}s)，请检查网络或稍后重试")
+        return last
     }
 }
