@@ -7,41 +7,55 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
-val TerminalBlack = Color(0xFF0C0C14)
-val TerminalSurface = Color(0xFF14141F)
-val AccentGreen = Color(0xFF4ADE80)
-val AccentPurple = Color(0xFFA78BFA)
-val AccentAmber = Color(0xFFFBBF24)
+val TerminalBlack = Color(0xFFF4F5F8)
+val TerminalSurface = Color(0xFFFFFFFF)
+val AccentGreen = Color(0xFF16A34A)
+val AccentPurple = Color(0xFF7C3AED)
+val AccentAmber = Color(0xFFB45309)
 
-val WinBg = Color(0xFF030604)
-val WinSurface = Color(0xFF090F0B)
-val WinBorder = Color(0xFF16241B)
-val TextMain = Color(0xFFD6E4D6)
-val TextDim = Color(0xFF71826F)
+val WinBg = Color(0xFFF4F5F8)
+val WinSurface = Color(0xFFFFFFFF)
+val WinBorder = Color(0xFFE2E5EC)
+val TextMain = Color(0xFF1A1D23)
+val TextDim = Color(0xFF6B7280)
 val DotR = Color(0xFFFF5F57)
 val DotY = Color(0xFFFEBC2E)
 val DotG = Color(0xFF28C840)
-val Cyan = Color(0xFF22D3EE)
-
-private val DarkScheme = darkColorScheme(
-    primary = AccentGreen,
-    onPrimary = Color.Black,
-    secondary = AccentPurple,
-    background = TerminalBlack,
-    surface = TerminalSurface,
-    onBackground = Color(0xFFE5E5E5),
-    onSurface = Color(0xFFE5E5E5)
-)
+val Cyan = Color(0xFF0891B2)
 
 private val LightScheme = lightColorScheme(
-    primary = Color(0xFF166534),
-    secondary = Color(0xFF6D28D9)
+    primary = AccentGreen,
+    onPrimary = Color.White,
+    secondary = AccentPurple,
+    background = WinBg,
+    surface = WinSurface,
+    surfaceVariant = Color(0xFFEAECF1),
+    onSurfaceVariant = TextDim,
+    onBackground = TextMain,
+    onSurface = TextMain,
+    outline = WinBorder
+)
+
+private val DarkScheme = darkColorScheme(
+    primary = Color(0xFF4ADE80),
+    onPrimary = Color.Black,
+    secondary = Color(0xFFA78BFA),
+    background = Color(0xFF0C0C14),
+    surface = Color(0xFF14141F),
+    surfaceVariant = Color(0xFF1E1E2A),
+    onSurfaceVariant = Color(0xFF9AA0B4),
+    onBackground = Color(0xFFE5E5E5),
+    onSurface = Color(0xFFE5E5E5),
+    outline = Color(0xFF2A2A3A)
 )
 
 @Composable
-fun AutopilotTheme(content: @Composable () -> Unit) {
+fun AutopilotTheme(
+    darkTheme: Boolean = false,
+    content: @Composable () -> Unit
+) {
     MaterialTheme(
-        colorScheme = if (isSystemInDarkTheme()) DarkScheme else LightScheme,
+        colorScheme = if (darkTheme) DarkScheme else LightScheme,
         content = content
     )
 }

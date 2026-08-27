@@ -360,7 +360,7 @@ private fun WelcomeBlock() {
             Row(Modifier.padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(mark, color = markColor, fontSize = 9.sp)
                 Spacer(Modifier.width(8.dp))
-                Text(line, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = Color(0xFF8B94A7))
+                Text(line, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = TextDim)
             }
         }
     }
@@ -373,42 +373,66 @@ private fun TerminalMessage(entry: ChatEntry, animate: Boolean) {
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End
         ) {
-            Text(
-                entry.text.take(1500),
-                color = Color(0xFFD9FBE8),
-                fontSize = 13.sp,
-                modifier = Modifier
-                    .background(
-                        Brush.linearGradient(listOf(Color(0xFF12291F), Color(0xFF101E33))),
-                        RoundedCornerShape(14.dp, 4.dp, 14.dp, 14.dp)
-                    )
-                    .border(1.dp, AccentGreen.copy(alpha = 0.20f), RoundedCornerShape(14.dp, 4.dp, 14.dp, 14.dp))
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
-            )
-        }
-        ChatRole.AI -> Row(Modifier.height(IntrinsicSize.Min)) {
             Box(
                 Modifier
-                    .width(2.5.dp)
-                    .fillMaxHeight()
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(Brush.verticalGradient(listOf(AccentGreen, Cyan)))
-            )
-            Spacer(Modifier.width(10.dp))
-            Column {
-                if (animate) TypewriterText(entry.text.take(2000))
-                else SimpleMarkdown(entry.text.take(2000))
+                    .background(
+                        Brush.linearGradient(listOf(Color(0xFF16A34A), Color(0xFF15803D))),
+                        RoundedCornerShape(16.dp, 4.dp, 16.dp, 16.dp)
+                    )
+                    .padding(horizontal = 14.dp, vertical = 9.dp)
+            ) {
+                Text(
+                    entry.text.take(1500),
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    lineHeight = 19.sp
+                )
             }
         }
-        ChatRole.CMD -> SurfaceCard(accent = toolAccent(entry.toolName)) {
-            val icon = toolIcon(entry.toolName)
-            Text(
-                "$icon ${entry.text.substringBefore("\n#")}",
-                color = toolColor(entry.toolName), fontSize = 12.sp,
-                fontFamily = FontFamily.Monospace
-            )
-            entry.text.substringAfter("\n#", "").takeIf { it.isNotBlank() }?.let {
-                Text("# $it", color = TextDim, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+        ChatRole.AI -> Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Start
+        ) {
+            Box(
+                Modifier
+                    .background(WinSurface, RoundedCornerShape(4.dp, 16.dp, 16.dp, 16.dp))
+                    .border(1.dp, WinBorder, RoundedCornerShape(4.dp, 16.dp, 16.dp, 16.dp))
+                    .padding(horizontal = 14.dp, vertical = 9.dp)
+            ) {
+                Column {
+                    Text(
+                        "AI",
+                        color = AccentGreen,
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 3.dp)
+                    )
+                    if (animate) TypewriterText(entry.text.take(2000))
+                    else SimpleMarkdown(entry.text.take(2000))
+                }
+            }
+        }
+        ChatRole.CMD -> Column(Modifier.fillMaxWidth()) {
+            SurfaceCard(accent = WinBorder) {
+                val icon = toolIcon(entry.toolName)
+                val color = toolColor(entry.toolName)
+                entry.text.split("\n").forEachIndexed { i, line ->
+                    if (line.isBlank()) return@forEachIndexed
+                    val isComment = line.startsWith("#")
+                    Row(Modifier.padding(vertical = 1.dp), verticalAlignment = Alignment.Top) {
+                        if (!isComment) {
+                            Text("$icon", color = color, fontSize = 12.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, modifier = Modifier.width(28.dp))
+                        }
+                        Text(
+                            if (isComment) line else line,
+                            color = if (isComment) TextDim else TextMain,
+                            fontSize = 12.sp,
+                            fontFamily = FontFamily.Monospace,
+                            lineHeight = 17.sp
+                        )
+                    }
+                }
             }
         }
         ChatRole.OUTPUT -> {
@@ -423,10 +447,10 @@ private fun TerminalMessage(entry: ChatEntry, animate: Boolean) {
                     Column {
                         lines.forEach { line ->
                             val color = when {
-                                line.startsWith("+ ") || line.startsWith("++ ") || line.startsWith("+\t") -> Color(0xFF4EC9B0)
-                                line.startsWith("- ") || line.startsWith("-- ") || line.startsWith("-\t") -> Color(0xFFF44747)
+                                line.startsWith("+ ") || line.startsWith("++ ") || line.startsWith("+\t") -> Color(0xFF16A34A)
+                                line.startsWith("- ") || line.startsWith("-- ") || line.startsWith("-\t") -> Color(0xFFDC2626)
                                 line.startsWith("--- diff") || line.startsWith("--- new file") -> Cyan
-                                else -> Color(0xFFB5BDCA)
+                                else -> TextDim
                             }
                             Text(
                                 line,
@@ -440,7 +464,7 @@ private fun TerminalMessage(entry: ChatEntry, animate: Boolean) {
                 } else {
                     Text(
                         text,
-                        color = Color(0xFFB5BDCA),
+                        color = TextDim,
                         fontSize = 10.sp,
                         lineHeight = 15.sp,
                         fontFamily = FontFamily.Monospace
@@ -449,7 +473,7 @@ private fun TerminalMessage(entry: ChatEntry, animate: Boolean) {
                 if (isLong) {
                     Text(
                         if (expanded) "[- 收起]" else "[+ 展开 ${fullText.length} chars]",
-                        color = Cyan.copy(alpha = 0.6f),
+                        color = Cyan.copy(alpha = 0.8f),
                         fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace,
                         modifier = Modifier.clickable { expanded = !expanded }.padding(top = 4.dp)
@@ -457,44 +481,40 @@ private fun TerminalMessage(entry: ChatEntry, animate: Boolean) {
                 }
             }
         }
-        ChatRole.SYSTEM -> Row(Modifier.height(IntrinsicSize.Min)) {
+        ChatRole.SYSTEM -> Row(Modifier.fillMaxWidth()) {
             Box(
                 Modifier
-                    .width(2.5.dp)
-                    .fillMaxHeight()
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(AccentAmber.copy(alpha = 0.7f))
-            )
-            Spacer(Modifier.width(10.dp))
-            Text(
-                entry.text.take(500),
-                color = AccentAmber.copy(alpha = 0.90f), fontSize = 12.sp, lineHeight = 17.sp
-            )
+                    .background(AccentAmber.copy(alpha = 0.10f), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+            ) {
+                Text(
+                    entry.text.take(500),
+                    color = AccentAmber, fontSize = 12.sp, lineHeight = 17.sp
+                )
+            }
         }
-        ChatRole.THINKING -> Row(Modifier.height(IntrinsicSize.Min)) {
+        ChatRole.THINKING -> Row(Modifier.fillMaxWidth()) {
             Box(
                 Modifier
-                    .width(2.5.dp)
-                    .fillMaxHeight()
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(AccentPurple.copy(alpha = 0.5f))
-            )
-            Spacer(Modifier.width(10.dp))
-            Column {
-                Text(
-                    "thinking",
-                    color = AccentPurple.copy(alpha = 0.6f),
-                    fontSize = 9.sp,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier.padding(bottom = 2.dp)
-                )
-                Text(
-                    entry.text.take(2000),
-                    color = Color(0xFF7A82A0),
-                    fontSize = 12.sp,
-                    lineHeight = 18.sp,
-                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
-                )
+                    .background(AccentPurple.copy(alpha = 0.08f), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+            ) {
+                Column {
+                    Text(
+                        "thinking",
+                        color = AccentPurple.copy(alpha = 0.8f),
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.padding(bottom = 2.dp)
+                    )
+                    Text(
+                        entry.text.take(2000),
+                        color = TextDim,
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp,
+                        fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
+                    )
+                }
             }
         }
         ChatRole.TOOL_CALL -> Unit
@@ -567,32 +587,34 @@ private fun StreamingMessage(text: String) {
         initialValue = 1f, targetValue = 0.15f,
         animationSpec = infiniteRepeatable(tween(520), RepeatMode.Reverse)
     )
-    Row(Modifier.height(IntrinsicSize.Min)) {
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Start
+    ) {
         Box(
             Modifier
-                .width(2.5.dp)
-                .fillMaxHeight()
-                .clip(RoundedCornerShape(2.dp))
-                .background(Brush.verticalGradient(listOf(AccentPurple, Cyan)))
-        )
-        Spacer(Modifier.width(10.dp))
-        Column {
-            Text(
-                "thinking",
-                color = AccentPurple.copy(alpha = 0.6f),
-                fontSize = 9.sp,
-                fontFamily = FontFamily.Monospace,
-                modifier = Modifier.padding(bottom = 2.dp)
-            )
-            Text(
-                buildAnnotatedString {
-                    append(text.take(3000))
-                    withStyle(SpanStyle(color = Cyan.copy(alpha = cursorAlpha))) { append("▌") }
-                },
-                color = Color(0xFF8B94B0),
-                fontSize = 13.sp,
-                lineHeight = 19.sp
-            )
+                .background(WinSurface, RoundedCornerShape(4.dp, 16.dp, 16.dp, 16.dp))
+                .border(1.dp, WinBorder, RoundedCornerShape(4.dp, 16.dp, 16.dp, 16.dp))
+                .padding(horizontal = 14.dp, vertical = 9.dp)
+        ) {
+            Column {
+                Text(
+                    "thinking",
+                    color = AccentPurple.copy(alpha = 0.8f),
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(bottom = 2.dp)
+                )
+                Text(
+                    buildAnnotatedString {
+                        append(text.take(3000))
+                        withStyle(SpanStyle(color = Cyan.copy(alpha = cursorAlpha))) { append("▌") }
+                    },
+                    color = TextMain,
+                    fontSize = 13.sp,
+                    lineHeight = 19.sp
+                )
+            }
         }
     }
 }
@@ -651,7 +673,7 @@ private fun TodoPanel(todos: List<dev.autopilot.terminal.agent.AgentEngine.TodoI
                         item.text,
                         fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace,
-                        color = if (item.done) Color(0xFF5F6B7F) else TextMain,
+                        color = if (item.done) TextDim else TextMain,
                         textDecoration = if (item.done) TextDecoration.LineThrough else null
                     )
                 }
@@ -998,7 +1020,7 @@ private fun GoalInput(vm: AutopilotViewModel, busy: Boolean) {
                 decorationBox = { inner ->
                     Box {
                         if (goal.isEmpty()) {
-                            Text("输入指令... (/ 命令, @ 文件, ↑↓ 历史)", fontSize = 12.sp, color = Color(0xFF565F73))
+                            Text("输入指令... (/ 命令, @ 文件, ↑↓ 历史)", fontSize = 12.sp, color = TextDim)
                         }
                         inner()
                         if (goal.startsWith("/") && goal.length <= 15 && !goal.contains(" ")) {
@@ -1043,7 +1065,7 @@ private fun GoalInput(vm: AutopilotViewModel, busy: Boolean) {
                                                 }.padding(horizontal = 12.dp, vertical = 5.dp),
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                    Text(path, color = Color(0xFF7EE3C8), fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                                    Text(path, color = AccentPurple, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
                                             }
                                         }
                                     }
@@ -1087,7 +1109,7 @@ private fun GoalInput(vm: AutopilotViewModel, busy: Boolean) {
                 .clickable(enabled = canSend) { sendChat() },
             contentAlignment = Alignment.Center
         ) {
-            Text("↑", color = Color(0xFF04140B), fontSize = 19.sp, fontWeight = FontWeight.Bold)
+            Text("↑", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold)
         }
 
         Spacer(Modifier.width(6.dp))

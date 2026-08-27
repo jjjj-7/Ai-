@@ -4,10 +4,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
@@ -32,7 +33,7 @@ import dev.autopilot.terminal.ui.files.FileTreeScreen
 import dev.autopilot.terminal.ui.settings.ModelSettingsScreen
 
 sealed class Dest(val route: String, val label: String, val icon: @Composable () -> Unit) {
-    data object Terminal : Dest("terminal", "终端", { Icon(Icons.Filled.Terminal, null) })
+    data object Chat : Dest("chat", "对话", { Icon(Icons.Filled.Chat, null) })
     data object Files : Dest("files", "文件", { Icon(Icons.Filled.Description, null) })
     data object Settings : Dest("settings", "设置", { Icon(Icons.Filled.Settings, null) })
 }
@@ -57,14 +58,14 @@ fun AppRoot(vm: AutopilotViewModel = viewModel()) {
 private fun InnerNavHost(vm: AutopilotViewModel) {
     val navController = rememberNavController()
     val backStack by navController.currentBackStackEntryAsState()
-    val currentRoute = backStack?.destination?.route ?: Dest.Terminal.route
+    val currentRoute = backStack?.destination?.route ?: Dest.Chat.route
 
     val navTarget by vm.navigateTab.collectAsStateSafe()
     LaunchedEffect(navTarget) {
         val target = navTarget ?: return@LaunchedEffect
         runCatching {
             navController.navigate(target) {
-                popUpTo(Dest.Terminal.route) { saveState = true }
+                popUpTo(Dest.Chat.route) { saveState = true }
                 launchSingleTop = true
             }
         }
@@ -72,15 +73,15 @@ private fun InnerNavHost(vm: AutopilotViewModel) {
     }
 
     Scaffold(
-        containerColor = dev.autopilot.terminal.ui.WinBg,
+        containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
-            NavigationBar(containerColor = Color(0xFF0B0B15)) {
-                listOf(Dest.Terminal, Dest.Files, Dest.Settings).forEach { dest ->
+            NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+                listOf(Dest.Chat, Dest.Files, Dest.Settings).forEach { dest ->
                     NavigationBarItem(
                         selected = currentRoute == dest.route,
                         onClick = {
                             navController.navigate(dest.route) {
-                                popUpTo(Dest.Terminal.route) { saveState = true }
+                                popUpTo(Dest.Chat.route) { saveState = true }
                                 launchSingleTop = true
                                 restoreState = true
                             }
@@ -88,11 +89,11 @@ private fun InnerNavHost(vm: AutopilotViewModel) {
                         icon = dest.icon,
                         label = { Text(dest.label, fontFamily = FontFamily.Monospace, fontSize = 11.sp) },
                         colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = AccentGreen,
-                            selectedTextColor = AccentGreen,
-                            indicatorColor = AccentGreen.copy(alpha = 0.13f),
-                            unselectedIconColor = Color(0xFF586074),
-                            unselectedTextColor = Color(0xFF586074)
+                            selectedIconColor = MaterialTheme.colorScheme.primary,
+                            selectedTextColor = MaterialTheme.colorScheme.primary,
+                            indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.13f),
+                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     )
                 }
@@ -101,10 +102,10 @@ private fun InnerNavHost(vm: AutopilotViewModel) {
     ) { padding ->
         NavHost(
             navController = navController,
-            startDestination = Dest.Terminal.route,
+            startDestination = Dest.Chat.route,
             modifier = Modifier.padding(padding)
         ) {
-            composable(Dest.Terminal.route) { TerminalScreen(vm) }
+            composable(Dest.Chat.route) { ChatScreen(vm) }
             composable(Dest.Files.route) { FileTreeScreen(vm) }
             composable(Dest.Settings.route) { ModelSettingsScreen(vm) }
         }

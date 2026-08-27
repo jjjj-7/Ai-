@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.autopilot.terminal.data.ModelConfig
 import dev.autopilot.terminal.ui.AutopilotViewModel
+import dev.autopilot.terminal.ui.TextDim
 import dev.autopilot.terminal.ui.collectAsStateSafe
 
 @Composable
@@ -41,9 +42,9 @@ fun ModelSettingsScreen(vm: AutopilotViewModel) {
             .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
-        Text("模型配置", fontSize = 18.sp, color = Color.White)
+        Text("模型配置", fontSize = 18.sp, color = dev.autopilot.terminal.ui.TextMain)
         Spacer(Modifier.height(4.dp))
-        Text("兼容 OpenAI Chat Completions 协议。密钥仅保存在本机加密存储中。", fontSize = 12.sp, color = Color(0xFF9CA3AF))
+        Text("兼容 OpenAI Chat Completions 协议。密钥仅保存在本机加密存储中。", fontSize = 12.sp, color = TextDim)
         Spacer(Modifier.height(12.dp))
 
         OutlinedTextField(
@@ -109,15 +110,15 @@ private fun CrashLogSection() {
             runCatching { dev.autopilot.terminal.CrashReporter.readableSummary(context) }.getOrDefault("暂无崩溃记录")
         }
     }
-    Text("诊断信息", fontSize = 16.sp, color = Color.White)
+    Text("诊断信息", fontSize = 16.sp, color = dev.autopilot.terminal.ui.TextMain)
     Spacer(Modifier.height(4.dp))
-    Text("若应用闪退，请把以下内容复制发给开发者。长按文本可全选复制。", fontSize = 11.sp, color = Color(0xFF9CA3AF))
+    Text("若应用闪退，请把以下内容复制发给开发者。长按文本可全选复制。", fontSize = 11.sp, color = TextDim)
     Spacer(Modifier.height(6.dp))
     androidx.compose.foundation.text.selection.SelectionContainer {
         Text(
             summary,
             fontSize = 10.sp,
-            color = Color(0xFFF87171),
+            color = Color(0xFFDC2626),
             fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
             modifier = Modifier
                 .fillMaxWidth()

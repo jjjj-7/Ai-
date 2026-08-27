@@ -67,6 +67,8 @@ import dev.autopilot.terminal.ui.AccentGreen
 import dev.autopilot.terminal.ui.AccentPurple
 import dev.autopilot.terminal.ui.TerminalBlack
 import dev.autopilot.terminal.ui.TerminalSurface
+import dev.autopilot.terminal.ui.TextDim
+import dev.autopilot.terminal.ui.TextMain
 import dev.autopilot.terminal.ui.AutopilotViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -78,8 +80,8 @@ import java.util.Locale
 
 private data class DirState(val entries: List<File> = emptyList(), val error: String? = null)
 
-private val CardColor = Color(0xFF1B1B29)
-private val GrayText = Color(0xFF8B8B9E)
+private val CardColor = Color(0xFFFFFFFF)
+private val GrayText = Color(0xFF6B7280)
 
 @Composable
 fun FileTreeScreen(vm: AutopilotViewModel) {
@@ -161,7 +163,7 @@ fun FileTreeScreen(vm: AutopilotViewModel) {
             Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("文件", fontSize = 17.sp, color = Color.White, modifier = Modifier.weight(1f))
+            Text("文件", fontSize = 17.sp, color = TextMain, modifier = Modifier.weight(1f))
             TextButton(onClick = {
                 runCatching { exportLauncher.launch("autopilot-workspace.zip") }
                     .onFailure { transferMsg = "无法启动导出: ${it.message}" }
@@ -216,7 +218,7 @@ fun FileTreeScreen(vm: AutopilotViewModel) {
                         textStyle = androidx.compose.ui.text.TextStyle(
                             fontFamily = FontFamily.Monospace,
                             fontSize = 12.sp,
-                            color = Color.White
+                            color = TextMain
                         ),
                         singleLine = true,
                         placeholder = { Text("/sdcard/...", fontSize = 11.sp, color = GrayText) }
@@ -407,7 +409,7 @@ private fun FileCard(entry: File, onOpenTerminal: (File) -> Unit, onClick: () ->
             Column(Modifier.weight(1f)) {
                 Text(
                     entry.name,
-                    color = if (entry.isDirectory) Color.White else Color(0xFFD8D8E4),
+                    color = if (entry.isDirectory) TextMain else TextDim,
                     fontSize = 13.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
