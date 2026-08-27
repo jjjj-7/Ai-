@@ -796,7 +796,7 @@ object AgentTools {
                     "except Exception as e:\n" +
                     "    print(f'Error: {e}')\n" +
                     "\" 2>&1"
-                val r = channel.exec(searchCmd.replace("\${'$'}{\"\$\"}query\${'$'}", "\"$query\""), 5_000)
+                val r = channel.exec(searchCmd.replace("\${'$'}{\"\$\"}query\${'$'}", "\"$query\""), 15_000)
                 if (r.output.isBlank()) ToolResult("No results found", isError = true)
                 else ToolResult(r.output.take(3000))
             }
@@ -817,7 +817,7 @@ object AgentTools {
                     "text = re.sub(r'\\s+', ' ', text).strip()\n" +
                     "print(text[:${maxLen}])\n" +
                     "\" \"$url\" 2>&1"
-                val r = channel.exec(fetchCmd, 5_000)
+                val r = channel.exec(fetchCmd, 20_000)
                 if (r.output.isBlank()) ToolResult("Failed to fetch $url", isError = true)
                 else ToolResult(r.output.take(maxLen))
             }
@@ -881,7 +881,7 @@ object AgentTools {
             GIT_STATUS -> {
                 if (channel == null) return ToolResult("Terminal not ready", isError = true)
                 val repoPath = args["path"]?.jsonPrimitive?.content ?: workspaceRoot.absolutePath
-                val r = channel.exec("cd $repoPath && git status --short 2>&1", 5_000)
+                val r = channel.exec("cd $repoPath && git status --short 2>&1", 10_000)
                 val sb = StringBuilder()
                 sb.append("Git status ($repoPath):\n")
                 sb.append(r.output.take(2000))
@@ -894,7 +894,7 @@ object AgentTools {
                 val staged = args["staged"]?.jsonPrimitive?.content == "true"
                 val file = args["file"]?.jsonPrimitive?.content
                 val cmd = "cd $repoPath && git diff ${if (staged) "--cached " else ""}${file ?: ""} 2>&1"
-                val r = channel.exec(cmd, 5_000)
+                val r = channel.exec(cmd, 15_000)
                 ToolResult(r.output.take(4000), isError = r.exitCode != 0 && r.exitCode != null)
             }
 
@@ -905,7 +905,7 @@ object AgentTools {
                 val files = args["files"]?.jsonArray?.map { it.jsonPrimitive.content }
                 val addCmd = if (files.isNullOrEmpty()) "git add -A" else files.joinToString(" ") { "git add \"$it\"" }
                 val cmd = "cd ${workspaceRoot.absolutePath} && $addCmd && git commit -m \"${msg.replace("\"", "\\\"")}\" 2>&1"
-                val r = channel.exec(cmd, 5_000)
+                val r = channel.exec(cmd, 15_000)
                 ToolResult(r.output.take(2000), isError = r.exitCode != null && r.exitCode != 0)
             }
 
@@ -915,7 +915,7 @@ object AgentTools {
                 val filter = args["filter"]?.jsonPrimitive?.content
                 val testCmd = detectTestCommand(File(projectPath), filter)
                 if (testCmd == null) return ToolResult("No test framework detected in $projectPath", isError = true)
-                val r = channel.exec("cd $projectPath && $testCmd 2>&1", 5_000)
+                val r = channel.exec("cd $projectPath && $testCmd 2>&1", 120_000)
                 val sb = StringBuilder()
                 sb.append("Test command: $testCmd\n")
                 sb.append("[exit=${r.exitCode ?: "timeout"}]\n")
@@ -1126,7 +1126,7 @@ object AgentTools {
         } ?: return ""
 
         return try {
-            val result = channel.exec(lintCmd, 5_000)
+            val result = channel.exec(lintCmd, 30_000)
             if (result.output.isBlank() || result.output.contains("no issues") || result.output.contains("All files")) {
                 "\n[lint] OK"
             } else {
