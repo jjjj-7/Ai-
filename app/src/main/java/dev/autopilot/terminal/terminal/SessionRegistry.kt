@@ -68,6 +68,11 @@ class SessionRegistry(
 
     fun byName(name: String): TermuxSessionState? = _sessions.value.firstOrNull { it.name == name }
 
+    fun directShellPath(): String? =
+        if (installer.isReady()) File(installer.prefix, "bin/sh").absolutePath else null
+
+    fun directEnv(cwd: String): Array<String> = installer.envSpec(cwd)
+
     override fun onTextChanged(changedSession: TerminalSession) {
         onOutput?.invoke()
     }

@@ -12,6 +12,7 @@ import dev.autopilot.terminal.llm.ToolCall
 import dev.autopilot.terminal.llm.ToolDefinition
 import dev.autopilot.terminal.perms.CommandChannel
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -204,7 +205,7 @@ class AgentEngine(
         while (iteration < maxIterations) {
             iteration++
             _sessionStats.value = _sessionStats.value.copy(iterations = iteration)
-            db.taskDao().byId(taskId)?.let { db.taskDao().update(it.copy(iterations = iteration)) }
+            scope.launch(Dispatchers.IO) { db.taskDao().byId(taskId)?.let { db.taskDao().update(it.copy(iterations = iteration)) } }
             compactIfNeeded(messages, systemCount = 2)
             trimWindow(messages, systemCount = 2, keep = WINDOW_KEEP)
             _contextUsage.value = estimateTokens(messages).toFloat() / (MAX_CONTEXT_CHARS / 4).toFloat().coerceAtLeast(1f)
@@ -379,7 +380,7 @@ class AgentEngine(
                 val verdict = RiskFilter.evaluate(cmd)
                 if (verdict is RiskFilter.Verdict.Confirm) {
                     pendingConfirmCommand = cmd
-                    db.auditDao().insert(AuditEntryEntity(taskId = taskId, channelLevel = channel.level, command = cmd, exitCode = null))
+                    scope.launch(Dispatchers.IO) { db.auditDao().insert(AuditEntryEntity(taskId = taskId, channelLevel = channel.level, command = cmd, exitCode = null)) }
                     _uiState.value = AgentUiState.AwaitConfirm(taskId, cmd, verdict.reason)
                     awaitConfirmDecision()
                     if (_uiState.value is AgentUiState.Stopped || _uiState.value is AgentUiState.Failed) return StopReason.ABORT
@@ -396,9 +397,12 @@ class AgentEngine(
                 val cmd = extractFromArgsSingle(tc.arguments, "command")
                     ?: extractFromArgsSingle(tc.arguments, "name")
                     ?: tc.function
-                db.auditDao().insert(
-                    AuditEntryEntity(taskId = taskId, channelLevel = channel.level, command = cmd, exitCode = result.exitCode)
-                )
+                val ec = result.exitCode
+                val lvl = channel.level
+                val tid = taskId
+                scope.launch(Dispatchers.IO) {
+                    db.auditDao().insert(AuditEntryEntity(taskId = tid, channelLevel = lvl, command = cmd, exitCode = ec))
+                }
             }
 
             val outputDisplay = if (result.output.length > 1500) {
@@ -597,7 +601,8 @@ class AgentEngine(
                             val verdict = RiskFilter.evaluate(cmd)
                             if (verdict is RiskFilter.Verdict.Confirm) {
                                 pendingConfirmCommand = cmd
-                                db.auditDao().insert(AuditEntryEntity(taskId = 0L, channelLevel = channel?.level ?: ChannelLevel.SANDBOX, command = cmd, exitCode = null))
+                                val lvl = channel?.level ?: ChannelLevel.SANDBOX
+                                scope.launch(Dispatchers.IO) { db.auditDao().insert(AuditEntryEntity(taskId = 0L, channelLevel = lvl, command = cmd, exitCode = null)) }
                                 _uiState.value = AgentUiState.AwaitConfirm(0L, cmd, verdict.reason)
                                 awaitConfirmDecision()
                                 pendingConfirmCommand = null
@@ -606,6 +611,7 @@ class AgentEngine(
                         }
 
                         _uiState.value = AgentUiState.Executing(0L, 0, 1, displayCmd.take(100), turns, tc.function)
+                        say(ChatRole.SYSTEM, "▶ ${tc.function}: ${displayCmd.take(80)}")
                         val result = AgentTools.execute(
                             tc.function, tc.arguments, channel,
                             workspaceRootProvider(), COMMAND_TIMEOUT_MS
@@ -726,19 +732,25 @@ class AgentEngine(
                 it.function !in listOf(AgentTools.TODO, AgentTools.FINISH, AgentTools.ABORT,
                     AgentTools.SUBAGENT, AgentTools.LISTEN)
             }
-            for (tc in actionCalls) {
-                val result = AgentTools.execute(
-                    tc.function, tc.arguments, channel,
-                    workspaceRootProvider(), COMMAND_TIMEOUT_MS
-                )
+            coroutineScope {
+                actionCalls.map { tc ->
+                    async {
+                        val result = AgentTools.execute(
+                            tc.function, tc.arguments, channel,
+                            workspaceRootProvider(), COMMAND_TIMEOUT_MS
+                        )
+                        Triple(tc, result.output, result)
+                    }
+                }.awaitAll()
+            }.forEach { (tc, output, result) ->
+                if (output == "__FINISH__") return "Sub-agent completed."
+                if (output == "__ABORT__") return "Sub-agent aborted."
                 subMessages += ChatMessage(
                     "tool",
                     Prompts.observation(tc.function, tc.arguments, result.output, result.isError, result.exitCode).content,
                     toolCallId = tc.id,
                     name = tc.function
                 )
-                if (result.output == "__FINISH__") return "Sub-agent completed."
-                if (result.output == "__ABORT__") return "Sub-agent aborted."
             }
         }
         return "Sub-agent reached iteration limit ($maxIter)."
@@ -812,10 +824,10 @@ class AgentEngine(
     }
 
     companion object {
-        const val COMMAND_TIMEOUT_MS = 120_000L
+        const val COMMAND_TIMEOUT_MS = 5_000L
         const val CONFIRM_TIMEOUT_MS = 10 * 60_000L
         const val CHAT_MAX_TURNS = 20
-        const val LLM_TIMEOUT_MS = 180_000L
+        const val LLM_TIMEOUT_MS = 120_000L
         const val MAX_TOKENS = 8192
         const val WINDOW_KEEP = 40
         const val CHAT_WINDOW_KEEP = 30
